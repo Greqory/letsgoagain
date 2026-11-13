@@ -1,0 +1,27 @@
+{
+ "id": "evt_1d705b539001I1U3SuRYWDAY3V",
+ "created": 1794608837945,
+ "type": "session.retry.scheduled",
+ "location": {
+  "directory": "/tmp/opencode/lga-sandbox/work"
+ },
+ "data": {
+  "sessionID": "ses_e28fa4af7ffeqz7CiHBYs0EJ3B",
+  "assistantMessageID": "msg_1d705b52a001Wj4hYAsOyDYCLS",
+  "attempt": 2,
+  "at": 1794608839645,
+  "error": {
+   "type": "provider.rate-limit",
+   "message": "rate_limit_error: Claude Max rate limit reached. Wait a moment and try again.",
+   "status": 200,
+   "response": {
+    "body": "{\"error\":{\"message\":\"Claude Max rate limit reached. Wait a moment and try again.\",\"retry_after\":4868,\"type\":\"rate_limit_error\"},\"type\":\"error\"}"
+   }
+  }
+ },
+ "durable": {
+  "aggregateID": "ses_e28fa4af7ffeqz7CiHBYs0EJ3B",
+  "seq": 6,
+  "version": 1
+ }
+}

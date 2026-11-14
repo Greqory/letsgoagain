@@ -18,8 +18,9 @@ import (
 	"github.com/Greqory/letsgoagain/internal/state"
 )
 
-// DefaultMessage is what a resumed session receives.
-const DefaultMessage = "Continue where you left off."
+// DefaultMessage is what a resumed session receives. Naming the limit tells the agent why its work broke
+// off, so it checks where it stood instead of assuming its last step completed.
+const DefaultMessage = "The Claude usage limit has reset. Continue where you left off."
 
 // API is the part of the OpenCode service the daemon uses.
 type API interface {

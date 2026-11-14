@@ -216,6 +216,13 @@ func TestResumeAtQuotaReset(t *testing.T) {
 	}
 }
 
+// What a session receives is the user's call (AGENTS.md §5): a change here must be deliberate.
+func TestDefaultMessage(t *testing.T) {
+	if DefaultMessage != "The Claude usage limit has reset. Continue where you left off." {
+		t.Fatalf("the resume message changed: %q", DefaultMessage)
+	}
+}
+
 func TestRetryAfterWhenQuotaUnavailable(t *testing.T) {
 	h := newHarness(t, false)
 	h.quota.err = errors.New("connection refused")

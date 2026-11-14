@@ -98,7 +98,9 @@ A reset time gets a 60 s margin before the resume.
 1. Quota still shows an exhausted bucket with a future reset → reschedule to it; no attempt used.
 2. The session must be unchanged since the stop: `outcome` still `"failed"`, `time.idle` equal to the stop's,
    not running (`GET /api/session/active`). Otherwise close the stop as "moved on" (someone else resumed it).
-3. Send `Continue where you left off.` via `POST /api/session/{id}/prompt`. Count the attempt.
+3. Send `The Claude usage limit has reset. Continue where you left off.` (the user's choice, 2026-11-14:
+   naming the limit tells the agent why it stopped; `--message` overrides it) via
+   `POST /api/session/{id}/prompt`. Count the attempt.
 4. `session.execution.succeeded` closes the stop as done. Another limit failure on the same session before
    a success is the same stop again: reschedule; after 5 attempts mark it failed and stop trying.
 5. The service unreachable at the due time → keep the stop and try on the next tick (the service may be

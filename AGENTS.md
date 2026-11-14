@@ -41,6 +41,8 @@ Out of scope: other agents, other providers, multiple machines, GUI, telemetry, 
 - **Resuming works**: `POST /api/session/{id}/prompt` with `{"text": "…"}` on the failed session starts a
   new execution (`session.execution.started` → `succeeded`).
 - **Subagents** are sessions with `parentID`; roots have none. A child's finished round wakes its parent.
+  When a child hits the limit, its root fails with the limit too; resuming the root is enough, the root
+  wakes the child again (real run, 2026-11-14).
 - **Events**: `GET /api/event` (SSE), filter with repeated `types=` (a comma list is a 400); the stream
   starts with `server.connected`.
 - **meridian's quota**: `GET http://127.0.0.1:3456/v1/usage/quota` (no auth) returns `buckets` of
@@ -97,9 +99,11 @@ A reset time gets a 60 s margin before the resume.
 
 ## 4. Still to verify
 
-- [ ] That the resume message shows up live in the user's TUI (it goes through the shared service, as the
-      TUI's own prompts do; the sandbox had no TUI attached).
-- [ ] A real limit stop end to end (the next time the user hits one): event, reset source, resume.
+- [x] The resume message shows up live in the user's TUI (user saw it, 2026-11-14).
+- [x] A real limit stop end to end (night of 2026-11-14, two root sessions): stops recorded at 02:51 and
+      03:08 from the meridian quota (five_hour, reset 03:30), resumes sent at 03:31, both ran to the end of
+      their work (one coordinator until 05:06), one attempt each. A subagent had hit the limit first
+      (02:50); resuming its root was enough: the root woke the subagent itself.
 - [ ] Whether a short burst limit also arrives as `rate_limit_error`; if so, a quota showing no exhausted
       bucket must not make LetsGoAgain wait 5 h (probing covers it: next check after 15 min).
 

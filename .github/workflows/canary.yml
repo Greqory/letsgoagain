@@ -28,12 +28,16 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Install the newest OpenCode
+      # opencode.ai/install installs only OpenCode 1; OpenCode 2 has its own installer.
+      - name: Install the newest OpenCode 2
         run: |
-          curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path
+          curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
       - run: opencode --version
       - run: python3 -I tools/sandbox/e2e.py
       - name: Logs of the failed run
         if: failure()
-        run: tail -n 100 /tmp/opencode/lga-sandbox/lga/daemon.log /tmp/opencode/lga-sandbox/fake.log || true
+        run: |
+          cd /tmp/opencode/lga-sandbox || exit 0
+          sed -E 's/(password ).*/\1<redacted>/' serve.log | tail -n 60 || true
+          tail -n 100 lga/daemon.log fake.log || true

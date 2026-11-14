@@ -21,7 +21,9 @@ carries on. It's like typing it yourself, without the 3 am alarm.
 
 LetsGoAgain is built for one setup and does that one well:
 
-- **[OpenCode](https://opencode.ai) v2** (tested with 2.3.0)
+- **[OpenCode](https://opencode.ai) v2** (tested with 2.3.0). `opencode --version` must say 2.x: the
+  plain installer still installs OpenCode 1; OpenCode 2 comes from
+  `curl -fsSL https://opencode.ai/v2/install | bash`.
 - **Claude Max through [meridian](https://github.com/rynfar/meridian)**, usually via the
   [`opencode-with-claude`](https://github.com/ianjwhite99/opencode-with-claude) plugin
 - **Linux** with systemd (x86_64 or arm64)

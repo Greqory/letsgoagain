@@ -24,6 +24,9 @@ Out of scope: other agents, other providers, multiple machines, GUI, telemetry, 
 
 ## 2. Facts it is built on (measured 2026-11-13, sandbox: real OpenCode 2.3.0 + `tools/fakemeridian`)
 
+- **OpenCode 2 has its own installer**: `curl -fsSL https://opencode.ai/v2/install | bash`. The plain
+  `opencode.ai/install` and npm's `opencode-ai@latest` install OpenCode 1 (1.19.5 on 2026-11-14), which has
+  no shared service and no v2 API (the first canary run failed on exactly that).
 - **OpenCode v2 runs one shared service** (`opencode serve --service`); every TUI is a client of it, and
   plugins and meridian run inside it. `~/.local/state/opencode/service.json` holds
   `{id, version, url, pid, password}`; the API takes HTTP Basic auth, user `opencode`, that password. The

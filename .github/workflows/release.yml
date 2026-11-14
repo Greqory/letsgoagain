@@ -16,6 +16,19 @@ jobs:
         with:
           go-version-file: go.mod
       - run: tools/check.sh
+      # The end-to-end check, as in canary.yml: no release that doesn't work with the newest OpenCode.
+      - name: Install the newest OpenCode 2
+        run: |
+          curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+      - run: opencode --version
+      - run: python3 -I tools/sandbox/e2e.py
+      - name: Logs of the failed end-to-end run
+        if: failure()
+        run: |
+          cd /tmp/opencode/lga-sandbox || exit 0
+          sed -E 's/(password ).*/\1<redacted>/' serve.log | tail -n 60 || true
+          tail -n 100 lga/daemon.log fake.log || true
       - name: Build
         env:
           CGO_ENABLED: "0"

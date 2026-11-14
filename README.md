@@ -225,8 +225,10 @@ python3 -I tools/sandbox/e2e.py   # end to end against a real OpenCode and a fak
 The end-to-end run uses its own OpenCode in `/tmp/opencode/lga-sandbox` and never touches yours.
 [`AGENTS.md`](AGENTS.md) holds the measured facts the design rests on and the project rules.
 
-Releases: push a tag like `v0.1.0`; the release workflow tests, builds the Linux binaries and publishes
-them with `checksums.txt`.
+Releases: push a tag like `v0.1.0`; the release workflow tests, runs the end-to-end check against the
+newest OpenCode, builds the Linux binaries and publishes them with `checksums.txt`. The same end-to-end
+check runs every Monday against the newest OpenCode (the `canary` workflow), and by hand for any branch:
+`gh workflow run canary --ref <branch>`.
 
 ## License
 

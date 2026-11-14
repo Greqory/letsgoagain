@@ -52,6 +52,48 @@ func TestParseLimit(t *testing.T) {
 	}
 }
 
+func messages(t *testing.T, name string) []Message {
+	t.Helper()
+	var out struct {
+		Data []Message `json:"data"`
+	}
+	if err := json.Unmarshal(fixture(t, name), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out.Data
+}
+
+func TestStopOf(t *testing.T) {
+	sandbox := messages(t, "messages_failed_desc.json")        // idle failed, assistant error, user
+	noop := messages(t, "messages_noop_after_limit_desc.json") // the real 2026-11-14 case: an empty run after the failure
+	user := Message{ID: "msg_user", Type: "user"}
+	reply := Message{ID: "msg_reply", Type: "assistant"}
+	synthetic := Message{ID: "msg_report", Type: "synthetic"}
+	tests := []struct {
+		name  string
+		msgs  []Message
+		ok    bool
+		msgID string
+		at    int64
+	}{
+		{"stopped", sandbox, true, "msg_1d705b52a001Wj4hYAsOyDYCLS", 1794608917050},
+		{"empty run after the stop", noop, true, "msg_1da2d7244001whNpBZxuazz2gw", 1794661875997},
+		{"user went on", append([]Message{user}, noop...), false, "", 0},
+		{"agent answered", append([]Message{{Type: "idle", Outcome: "succeeded"}, reply, user}, noop...), false, "", 0},
+		{"a subagent report arrived", append([]Message{synthetic}, sandbox...), false, "", 0},
+		{"other failure", []Message{{Type: "idle", Outcome: "failed"}, {ID: "x", Type: "assistant", Error: json.RawMessage(`{"type":"aborted"}`)}}, false, "", 0},
+		{"no messages", nil, false, "", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stop, ok := StopOf(tt.msgs)
+			if ok != tt.ok || stop.MessageID != tt.msgID || stop.At != tt.at {
+				t.Fatalf("got %+v %v", stop, ok)
+			}
+		})
+	}
+}
+
 func TestReadService(t *testing.T) {
 	dir := t.TempDir()
 	good := filepath.Join(dir, "service.json")
@@ -98,7 +140,7 @@ func TestClient(t *testing.T) {
 		case r.URL.Path == "/api/session/ses_e28fa4af7ffeqz7CiHBYs0EJ3B" && r.Method == http.MethodGet:
 			w.Write(fixture(t, "session_failed.json"))
 		case r.URL.Path == "/api/session/ses_e28fa4af7ffeqz7CiHBYs0EJ3B/message":
-			if r.URL.Query().Get("order") != "desc" || r.URL.Query().Get("limit") != "1" {
+			if r.URL.Query().Get("order") != "desc" || r.URL.Query().Get("limit") != "10" {
 				t.Errorf("message query %q", r.URL.RawQuery)
 			}
 			w.Write(fixture(t, "messages_failed_desc.json"))
@@ -131,12 +173,12 @@ func TestClient(t *testing.T) {
 	if err != nil || s.Outcome != "failed" || s.Time.Idle != 1794608917050 || s.ParentID != "" || s.Location.Directory != "/tmp/opencode/lga-sandbox/work" {
 		t.Fatalf("session: %+v, %v", s, err)
 	}
-	m, err := c.LatestMessage(ctx, id)
-	if err != nil || m.Type != "idle" || m.Outcome != "failed" {
-		t.Fatalf("latest message: %+v, %v", m, err)
+	msgs, err := c.RecentMessages(ctx, id, 10)
+	if err != nil || len(msgs) != 3 || msgs[0].Type != "idle" || msgs[0].Outcome != "failed" {
+		t.Fatalf("recent messages: %+v, %v", msgs, err)
 	}
-	if l, ok := ParseLimit(m.Error); !ok || l.RetryAfter != 4868 {
-		t.Fatalf("latest message limit: %+v, %v", l, ok)
+	if stop, ok := StopOf(msgs); !ok || stop.Limit.RetryAfter != 4868 || stop.MessageID != "msg_1d705b52a001Wj4hYAsOyDYCLS" {
+		t.Fatalf("stop: %+v, %v", stop, ok)
 	}
 	if err := c.Prompt(ctx, id, "Continue where you left off."); err != nil || prompted != `{"text":"Continue where you left off."}` {
 		t.Fatalf("prompt: %q, %v", prompted, err)

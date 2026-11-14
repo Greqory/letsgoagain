@@ -40,7 +40,16 @@ Out of scope: other agents, other providers, multiple machines, GUI, telemetry, 
   `data.error.type = "provider.rate-limit"`, the meridian body as a string in `data.error.response.body`.
   That event is the stop signal. Fixtures: `internal/opencode/testdata/`.
 - **After the stop**: `GET /api/session/{id}` shows `outcome: "failed"` and `time.idle`; the newest message
-  (`GET /api/session/{id}/message?order=desc`) is `type: "idle"`, `outcome: "failed"`, same `error`.
+  (`GET /api/session/{id}/message?order=desc`) is `type: "idle"`, `outcome: "failed"`, same `error`, after the
+  failed `assistant` message. The messages are written by the time `session.execution.failed` arrives.
+- **OpenCode sometimes runs an empty execution right after a limit failure** (2026-11-14: 6 times in two
+  weeks, 5–60 ms after the failure, root and child sessions): `execution.started` → `succeeded` with no model
+  call and no message, just one more `idle` entry with `outcome: "succeeded"`; the session's `outcome` and
+  `time.idle` change with it. So neither a started nor a succeeded execution, nor `outcome`/`time.idle`,
+  says that anyone went on. Only the messages do: while the newest message that isn't `idle` is still the
+  failed assistant message, the session stands at the stop (`opencode.StopOf`). Fixture:
+  `messages_noop_after_limit_desc.json` (the real case; trusting `execution.started` closed that stop as
+  "continued without LetsGoAgain" and the session was never resumed).
 - **Resuming works**: `POST /api/session/{id}/prompt` with `{"text": "…"}` on the failed session starts a
   new execution (`session.execution.started` → `succeeded`).
 - **A note in the TUI without running the session** (measured 2026-11-14): `POST /api/session/{id}/synthetic`
@@ -69,15 +78,17 @@ Out of scope: other agents, other providers, multiple machines, GUI, telemetry, 
 One Go program, `letsgoagain`, no OpenCode plugin.
 
 - `letsgoagain daemon [--dry-run]`: runs as a systemd user service.
-  1. Reads `service.json`, connects to the service, subscribes to
-     `session.execution.failed|started|succeeded`. Reconnects (re-reading `service.json`) every 30 s when the
+  1. Reads `service.json`, connects to the service, subscribes to `session.execution.failed|succeeded`
+     (not `started`: §2, empty executions). Reconnects (re-reading `service.json`) every 30 s when the
      service is down or restarted.
   2. On every (re)connect, logs the OpenCode version (from `service.json`) and meridian's (the `version`
      field of its `/health`, nothing else from it) against the tested ones in `internal/compat`, with a
-     warning when they differ (only when that changed since the last connect), and scans recent root
-     sessions with `outcome: "failed"` for limit stops it missed.
-  3. A `session.execution.failed` with `provider.rate-limit` on a **root** session records a stop (child
-     sessions are ignored: their parent fails too and is the one resumed).
+     warning when they differ (only when that changed since the last connect), and scans the root sessions
+     updated within 12 h (and those with an open stop) by their messages: a stop it missed is recorded, an
+     open stop whose session went on is closed.
+  3. A `session.execution.failed` with `provider.rate-limit` on a **root** session records a stop, keyed by
+     the failed assistant message's ID (child sessions are ignored: their parent fails too and is the one
+     resumed). A `succeeded` closes an open stop only if the messages show the session went on (§2).
   4. Checks the wall clock every 30 s (a laptop that slept through a reset resumes on wake); resumes due stops.
   5. `--dry-run` records and logs, sends nothing.
   6. **TUI notice** (off with `--no-notice`, never in dry run): a recorded stop queues
@@ -110,12 +121,13 @@ A reset time gets a 60 s margin before the resume.
 
 ### Resuming a due stop
 1. Quota still shows an exhausted bucket with a future reset → reschedule to it; no attempt used.
-2. The session must be unchanged since the stop: `outcome` still `"failed"`, `time.idle` equal to the stop's,
-   not running (`GET /api/session/active`). Otherwise close the stop as "moved on" (someone else resumed it).
+2. The session must still stand at the stop: not running (`GET /api/session/active`) and its newest
+   non-`idle` message still the stop's failed assistant message (§2). Another message → close as "moved on"
+   (someone else continued it); a newer limit failure → follow that stop instead (reschedule).
 3. Send `The Claude usage limit has reset. Continue where you left off.` (the user's choice, 2026-11-14:
    naming the limit tells the agent why it stopped; `--message` overrides it) via
    `POST /api/session/{id}/prompt`. Count the attempt.
-4. `session.execution.succeeded` closes the stop as done. Another limit failure on the same session before
+4. `session.execution.succeeded` after the resume closes the stop as done. Another limit failure on the same session before
    a success is the same stop again: reschedule; after 5 attempts mark it failed and stop trying.
 5. The service unreachable at the due time → keep the stop and try on the next tick (the service may be
    restarting); a session that no longer exists (404) → "gone".

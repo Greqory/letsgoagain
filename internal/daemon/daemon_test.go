@@ -25,7 +25,7 @@ const limitErr = `{"type":"provider.rate-limit","message":"rate_limit_error: Cla
 type fakeAPI struct {
 	mu        sync.Mutex
 	sessions  map[string]opencode.Session
-	latest    map[string]opencode.Message
+	messages  map[string][]opencode.Message // oldest first, as OpenCode writes them
 	running   map[string]bool
 	prompts   []string
 	promptErr error
@@ -76,18 +76,76 @@ func (f *fakeAPI) inboxDescriptions() []string {
 func (f *fakeAPI) Version() string { return f.version }
 
 func newFakeAPI() *fakeAPI {
-	return &fakeAPI{sessions: map[string]opencode.Session{}, latest: map[string]opencode.Message{}, running: map[string]bool{},
+	return &fakeAPI{sessions: map[string]opencode.Session{}, messages: map[string][]opencode.Message{}, running: map[string]bool{},
 		inbox: map[string]string{}}
 }
 
-func (f *fakeAPI) addFailed(id, parent string, idle time.Time) {
+// append adds messages to a session (creating it) and moves its outcome and times along.
+func (f *fakeAPI) append(id, parent string, at time.Time, outcome string, msgs ...opencode.Message) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	s := opencode.Session{ID: id, ParentID: parent, Title: "work " + id, Outcome: "failed"}
-	s.Time.Idle = idle.UnixMilli()
-	s.Location.Directory = "/repo"
+	s, ok := f.sessions[id]
+	if !ok {
+		s = opencode.Session{ID: id, ParentID: parent, Title: "work " + id}
+		s.Location.Directory = "/repo"
+		f.messages[id] = []opencode.Message{f.msg("user", at, "")}
+	}
+	for _, m := range msgs {
+		m.Time.Created = at.UnixMilli()
+		f.messages[id] = append(f.messages[id], m)
+	}
+	s.Outcome, s.Time.Idle, s.Time.Updated = outcome, at.UnixMilli(), at.UnixMilli()
 	f.sessions[id] = s
-	f.latest[id] = opencode.Message{Type: "idle", Outcome: "failed", Error: json.RawMessage(limitErr)}
+}
+
+func (f *fakeAPI) msg(typ string, at time.Time, errJSON string) opencode.Message {
+	f.nextID++
+	m := opencode.Message{ID: fmt.Sprintf("msg_%s%d", typ, f.nextID), Type: typ}
+	m.Time.Created = at.UnixMilli()
+	if errJSON != "" {
+		m.Error, m.Outcome = json.RawMessage(errJSON), "failed"
+	}
+	return m
+}
+
+// addFailedWith: the session's newest run failed with errJSON, as OpenCode records it.
+func (f *fakeAPI) addFailedWith(id, parent string, at time.Time, errJSON string) {
+	f.mu.Lock()
+	assistant, idle := f.msg("assistant", at, errJSON), f.msg("idle", at, errJSON)
+	f.mu.Unlock()
+	f.append(id, parent, at, "failed", assistant, idle)
+}
+
+func (f *fakeAPI) addFailed(id, parent string, at time.Time) {
+	f.addFailedWith(id, parent, at, limitErr)
+}
+
+// emptyRun is what OpenCode sometimes does right after a limit failure: an execution with no model
+// call and no message, ending "succeeded" (seen 2026-11-14).
+func (f *fakeAPI) emptyRun(id string, at time.Time) {
+	f.mu.Lock()
+	idle := f.msg("idle", at, "")
+	f.mu.Unlock()
+	idle.Outcome = "succeeded"
+	f.append(id, "", at, "succeeded", idle)
+}
+
+// goesOn: someone sent a message and the agent answered.
+func (f *fakeAPI) goesOn(id string, at time.Time) {
+	f.mu.Lock()
+	user, reply, idle := f.msg("user", at, ""), f.msg("assistant", at, ""), f.msg("idle", at, "")
+	f.mu.Unlock()
+	idle.Outcome = "succeeded"
+	f.append(id, "", at, "succeeded", user, reply, idle)
+}
+
+// agentRuns: after a resume, the agent works and the run succeeds.
+func (f *fakeAPI) agentRuns(id string, at time.Time) {
+	f.mu.Lock()
+	reply, idle := f.msg("assistant", at, ""), f.msg("idle", at, "")
+	f.mu.Unlock()
+	idle.Outcome = "succeeded"
+	f.append(id, "", at, "succeeded", reply, idle)
 }
 
 func (f *fakeAPI) Session(_ context.Context, id string) (opencode.Session, error) {
@@ -112,10 +170,15 @@ func (f *fakeAPI) RootSessions(context.Context, int) ([]opencode.Session, error)
 	return out, nil
 }
 
-func (f *fakeAPI) LatestMessage(_ context.Context, id string) (opencode.Message, error) {
+func (f *fakeAPI) RecentMessages(_ context.Context, id string, n int) ([]opencode.Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.latest[id], nil
+	all := f.messages[id]
+	var out []opencode.Message
+	for i := len(all) - 1; i >= 0 && len(out) < n; i-- {
+		out = append(out, all[i])
+	}
+	return out, nil
 }
 
 func (f *fakeAPI) Running(_ context.Context, id string) (bool, error) {
@@ -132,6 +195,8 @@ func (f *fakeAPI) Prompt(_ context.Context, id, text string) error {
 	}
 	f.prompts = append(f.prompts, id+": "+text)
 	f.calls = append(f.calls, "prompt "+id)
+	user := f.msg("user", time.UnixMilli(f.sessions[id].Time.Updated), "")
+	f.messages[id] = append(f.messages[id], user)
 	return nil
 }
 
@@ -249,6 +314,7 @@ func TestResumeAtQuotaReset(t *testing.T) {
 	if st.Status != state.Resumed {
 		t.Fatalf("our own resume closed the stop: %+v", st)
 	}
+	h.api.agentRuns("ses_a", h.now)
 	h.event(opencode.EventExecutionSucceeded, "ses_a")
 	if st.Status != state.Done {
 		t.Fatalf("after success %+v", st)
@@ -320,18 +386,36 @@ func TestMovedOn(t *testing.T) {
 		h.api.addFailed("ses_a", "", stopTime)
 		h.event(opencode.EventExecutionFailed, "ses_a")
 		h.event(opencode.EventExecutionStarted, "ses_a")
+		h.api.goesOn("ses_a", stopTime.Add(time.Minute))
+		h.event(opencode.EventExecutionSucceeded, "ses_a")
+		if st := h.stop("ses_a"); st.Status != state.MovedOn {
+			t.Fatalf("stop %+v", st)
+		}
 		h.at(stopTime.Add(6 * time.Hour))
-		if st := h.stop("ses_a"); st.Status != state.MovedOn || h.api.promptCount() != 0 {
-			t.Fatalf("stop %+v, prompts %d", st, h.api.promptCount())
+		if h.api.promptCount() != 0 {
+			t.Fatalf("prompts %d", h.api.promptCount())
 		}
 	})
 	t.Run("changed while the daemon missed it", func(t *testing.T) {
 		h := newHarness(t, false)
 		h.api.addFailed("ses_a", "", stopTime)
 		h.event(opencode.EventExecutionFailed, "ses_a")
-		h.api.addFailed("ses_a", "", stopTime.Add(time.Minute)) // a later idle time
+		h.api.goesOn("ses_a", stopTime.Add(time.Minute))
 		h.at(stopTime.Add(6 * time.Hour))
 		if st := h.stop("ses_a"); st.Status != state.MovedOn || h.api.promptCount() != 0 {
+			t.Fatalf("stop %+v, prompts %d", st, h.api.promptCount())
+		}
+	})
+	t.Run("stopped at the limit again while the daemon missed it", func(t *testing.T) {
+		h := newHarness(t, false)
+		h.api.addFailed("ses_a", "", stopTime)
+		h.event(opencode.EventExecutionFailed, "ses_a")
+		first := h.stop("ses_a").MessageID
+		h.api.goesOn("ses_a", stopTime.Add(time.Minute))
+		h.api.addFailed("ses_a", "", stopTime.Add(2*time.Minute))
+		h.at(stopTime.Add(6 * time.Hour))
+		st := h.stop("ses_a")
+		if st.Status != state.Waiting || st.MessageID == first || !st.StoppedAt.Equal(stopTime.Add(2*time.Minute)) || h.api.promptCount() != 0 {
 			t.Fatalf("stop %+v, prompts %d", st, h.api.promptCount())
 		}
 	})
@@ -343,6 +427,41 @@ func TestMovedOn(t *testing.T) {
 		h.at(stopTime.Add(6 * time.Hour))
 		if st := h.stop("ses_a"); st.Status != state.MovedOn || h.api.promptCount() != 0 {
 			t.Fatalf("stop %+v, prompts %d", st, h.api.promptCount())
+		}
+	})
+}
+
+// The 2026-11-14 miss: OpenCode ran an empty execution 5 ms after the limit failure, and the stop was
+// closed as "continued without LetsGoAgain".
+func TestEmptyRunAfterTheStop(t *testing.T) {
+	t.Run("live", func(t *testing.T) {
+		h := newHarness(t, false)
+		h.api.addFailed("ses_a", "", stopTime)
+		h.event(opencode.EventExecutionFailed, "ses_a")
+		h.event(opencode.EventExecutionStarted, "ses_a")
+		h.api.emptyRun("ses_a", stopTime.Add(5*time.Millisecond))
+		h.event(opencode.EventExecutionSucceeded, "ses_a")
+		st := h.stop("ses_a")
+		if st.Status != state.Waiting || len(h.api.inboxDescriptions()) != 1 || !strings.Contains(h.log.String(), "empty execution after the stop; still waiting") {
+			t.Fatalf("stop %+v, inbox %v; log:\n%s", st, h.api.inboxDescriptions(), h.log)
+		}
+		h.at(st.NextAt)
+		if h.api.promptCount() != 1 || st.Status != state.Resumed {
+			t.Fatalf("not resumed: prompts %d, stop %+v; log:\n%s", h.api.promptCount(), st, h.log)
+		}
+	})
+	t.Run("found by the scan", func(t *testing.T) {
+		h := newHarness(t, false)
+		h.api.addFailed("ses_a", "", stopTime)
+		h.api.emptyRun("ses_a", stopTime.Add(5*time.Millisecond))
+		h.d.handle(context.Background(), connected{h.api})
+		st := h.stop("ses_a")
+		if st.Status != state.Waiting || !st.StoppedAt.Equal(stopTime) {
+			t.Fatalf("stop %+v", st)
+		}
+		h.d.handle(context.Background(), connected{h.api}) // a later scan leaves it alone
+		if st.Status != state.Waiting || strings.Count(h.log.String(), "limit stop recorded") != 1 {
+			t.Fatalf("stop %+v; log:\n%s", st, h.log)
 		}
 	})
 }
@@ -414,8 +533,7 @@ func TestScanOnConnect(t *testing.T) {
 	h.now = stopTime.Add(time.Hour)
 	h.api.addFailed("ses_recent", "", stopTime)
 	h.api.addFailed("ses_old", "", stopTime.Add(-13*time.Hour))
-	h.api.addFailed("ses_other", "", stopTime)
-	h.api.latest["ses_other"] = opencode.Message{Type: "idle", Outcome: "failed", Error: json.RawMessage(`{"type":"aborted"}`)}
+	h.api.addFailedWith("ses_other", "", stopTime, `{"type":"aborted","message":"Step interrupted"}`)
 	h.d.handle(context.Background(), connected{h.api})
 	if len(h.d.st.Stops) != 1 || h.d.st.Stops["ses_recent"] == nil {
 		t.Fatalf("stops %+v", h.d.st.Stops)
@@ -424,12 +542,10 @@ func TestScanOnConnect(t *testing.T) {
 	if strings.Count(h.log.String(), "limit stop recorded") != 1 {
 		t.Fatalf("recorded twice:\n%s", h.log)
 	}
-	s := h.api.sessions["ses_recent"]
-	s.Outcome = "succeeded"
-	h.api.sessions["ses_recent"] = s
+	h.api.goesOn("ses_recent", stopTime.Add(30*time.Minute))
 	h.d.handle(context.Background(), connected{h.api})
-	if st := h.stop("ses_recent"); st.Status != state.Done {
-		t.Fatalf("after a success seen by the scan: %+v", st)
+	if st := h.stop("ses_recent"); st.Status != state.MovedOn {
+		t.Fatalf("after someone went on, seen by the scan: %+v", st)
 	}
 }
 
@@ -470,9 +586,12 @@ func TestNoticeLifecycle(t *testing.T) {
 
 func TestNoticeRemovedWhenTheStopEndsOtherwise(t *testing.T) {
 	for name, end := range map[string]func(h *harness){
-		"continued by hand": func(h *harness) { h.event(opencode.EventExecutionStarted, "ses_a") },
+		"continued by hand": func(h *harness) {
+			h.api.goesOn("ses_a", stopTime.Add(time.Minute))
+			h.event(opencode.EventExecutionSucceeded, "ses_a")
+		},
 		"changed unseen": func(h *harness) {
-			h.api.addFailed("ses_a", "", stopTime.Add(time.Minute))
+			h.api.goesOn("ses_a", stopTime.Add(time.Minute))
 			h.at(stopTime.Add(6 * time.Hour))
 		},
 	} {
@@ -517,11 +636,11 @@ func TestNoticeFailureDoesNotStopTheResume(t *testing.T) {
 
 func TestProbeNotice(t *testing.T) {
 	h := newHarness(t, false)
-	h.api.addFailed("ses_a", "", stopTime)
-	h.api.latest["ses_a"] = opencode.Message{}
+	noRetryAfter := `{"type":"provider.rate-limit","message":"m","response":{"body":"{}"}}`
+	h.api.addFailedWith("ses_a", "", stopTime, noRetryAfter)
 	ev := opencode.Event{Type: opencode.EventExecutionFailed}
 	ev.Data.SessionID = "ses_a"
-	ev.Data.Error = json.RawMessage(`{"type":"provider.rate-limit","message":"m","response":{"body":"{}"}}`)
+	ev.Data.Error = json.RawMessage(noRetryAfter)
 	h.d.handle(context.Background(), eventMsg{ev})
 	want := "LetsGoAgain · Claude limit reached · reset unknown, checking again " + h.stop("ses_a").NextAt.Local().Format("Mon 15:04")
 	if got := h.api.inboxDescriptions(); len(got) != 1 || got[0] != want {

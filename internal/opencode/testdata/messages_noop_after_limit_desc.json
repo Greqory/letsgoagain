@@ -1,0 +1,54 @@
+{
+ "data": [
+  {
+   "id": "msg_1da2f0122001bKu3UninyyKfpt",
+   "type": "idle",
+   "time": {
+    "created": 1794661876002
+   },
+   "outcome": "succeeded"
+  },
+  {
+   "id": "msg_1da2f011d0014S9LMQcbNmX2cp",
+   "type": "idle",
+   "time": {
+    "created": 1794661875997
+   },
+   "outcome": "failed",
+   "error": {
+    "type": "provider.rate-limit",
+    "message": "rate_limit_error: Claude Max rate limit reached. Wait a moment and try again.",
+    "status": 200,
+    "response": {
+     "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Claude Max rate limit reached. Wait a moment and try again.\",\"retry_after\":4725}}"
+    }
+   }
+  },
+  {
+   "id": "msg_1da2d7244001whNpBZxuazz2gw",
+   "type": "assistant",
+   "time": {
+    "created": 1794661874444
+   },
+   "error": {
+    "type": "provider.rate-limit",
+    "message": "rate_limit_error: Claude Max rate limit reached. Wait a moment and try again.",
+    "status": 200,
+    "response": {
+     "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Claude Max rate limit reached. Wait a moment and try again.\",\"retry_after\":4725}}"
+    }
+   },
+   "finish": "error",
+   "content": []
+  },
+  {
+   "id": "msg_1da2adc64001J24N4Z2wolAZiq",
+   "type": "assistant",
+   "time": {
+    "created": 1794661604459
+   },
+   "finish": "tool-calls",
+   "content": []
+  }
+ ]
+}

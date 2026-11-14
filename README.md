@@ -99,6 +99,31 @@ Everything it decides is written to `~/.local/state/letsgoagain/letsgoagain.log`
 tail -f ~/.local/state/letsgoagain/letsgoagain.log
 ```
 
+### Already at the limit? Queue tonight's work anyway
+
+It's late, you just hit the limit, and you want the night's window for a big batch. You don't need to
+schedule anything: **start the new session now**, with the full task as its first message, as usual.
+
+1. OpenCode sends the task, meridian refuses it, OpenCode retries for about 80 seconds and gives up.
+2. LetsGoAgain records that stop like any other, with the reset time from meridian.
+3. A minute after the reset the session gets its resume message. Its first message is still your task,
+   so the agent starts on it.
+
+Sessions already stopped at the limit resume at the same reset, so they all share the new window.
+
+Before you go to bed, give it two minutes and check:
+
+```sh
+letsgoagain status
+```
+
+The new session should show as `waiting`, with a reset from `quota five_hour`. You can close the
+terminal; the session lives on in OpenCode's background service. Two things to know:
+
+- If `status` says `seven_day`, the **weekly** limit is spent and the reset may be days away.
+- Write the task so it runs without questions or permission prompts: a session waiting for your answer
+  isn't at a limit and stays waiting.
+
 ## Update
 
 ```sh

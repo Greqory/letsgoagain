@@ -119,6 +119,9 @@ A reset time gets a 60 s margin before the resume.
       03:08 from the meridian quota (five_hour, reset 03:30), resumes sent at 03:31, both ran to the end of
       their work (one coordinator until 05:06), one attempt each. A subagent had hit the limit first
       (02:50); resuming its root was enough: the root woke the subagent itself.
+- [ ] A session whose *first* message hits the limit (the README's "queue tonight's work" case), with a
+      real agent: the mechanics are the sandbox's "live" scenario, but a real agent starting its task from
+      the resume message has not been seen yet.
 - [ ] Whether a short burst limit also arrives as `rate_limit_error`; if so, a quota showing no exhausted
       bucket must not make LetsGoAgain wait 5 h (probing covers it: next check after 15 min).
 

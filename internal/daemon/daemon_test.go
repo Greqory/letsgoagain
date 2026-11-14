@@ -29,7 +29,10 @@ type fakeAPI struct {
 	running   map[string]bool
 	prompts   []string
 	promptErr error
+	version   string
 }
+
+func (f *fakeAPI) Version() string { return f.version }
 
 func newFakeAPI() *fakeAPI {
 	return &fakeAPI{sessions: map[string]opencode.Session{}, latest: map[string]opencode.Message{}, running: map[string]bool{}}
@@ -102,8 +105,16 @@ func (f *fakeAPI) promptCount() int {
 }
 
 type fakeQuota struct {
-	q   meridian.Quota
-	err error
+	q       meridian.Quota
+	err     error
+	version string
+}
+
+func (f *fakeQuota) Version(context.Context) (string, error) {
+	if f.version == "" {
+		return "", errors.New("no /health")
+	}
+	return f.version, nil
 }
 
 func (f *fakeQuota) Quota(context.Context) (meridian.Quota, error) { return f.q, f.err }
@@ -364,6 +375,29 @@ func TestScanOnConnect(t *testing.T) {
 	h.d.handle(context.Background(), connected{h.api})
 	if st := h.stop("ses_recent"); st.Status != state.Done {
 		t.Fatalf("after a success seen by the scan: %+v", st)
+	}
+}
+
+func TestVersionNotes(t *testing.T) {
+	h := newHarness(t, false) // connected once with unknown versions
+	if !strings.Contains(h.log.String(), "warning: OpenCode version unknown") || !strings.Contains(h.log.String(), "meridian version unavailable") {
+		t.Fatalf("log:\n%s", h.log)
+	}
+	h.log.Reset()
+	h.api.version, h.quota.version = "2.3.0", "1.79.0"
+	h.d.handle(context.Background(), connected{h.api})
+	if got := h.log.String(); !strings.Contains(got, "OpenCode 2.3.0 (tested: 2.3)") || !strings.Contains(got, "meridian 1.79.0 (tested: 1.79)") || strings.Contains(got, "warning") {
+		t.Fatalf("tested versions:\n%s", got)
+	}
+	h.log.Reset()
+	h.d.handle(context.Background(), connected{h.api})
+	if strings.Contains(h.log.String(), "OpenCode 2.3.0") {
+		t.Fatalf("a reconnect with the same versions logged them again:\n%s", h.log)
+	}
+	h.api.version = "2.4.1"
+	h.d.handle(context.Background(), connected{h.api})
+	if !strings.Contains(h.log.String(), "warning: OpenCode 2.4.1 is newer than the tested 2.3") {
+		t.Fatalf("newer version:\n%s", h.log)
 	}
 }
 

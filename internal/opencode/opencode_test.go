@@ -62,6 +62,9 @@ func TestReadService(t *testing.T) {
 	if err != nil || s.URL != "http://127.0.0.1:1" || s.Password != "secret-pw" || s.PID != 7 {
 		t.Fatalf("got %+v, %v", s, err)
 	}
+	if v := NewClient(s).Version(); v != "2.3.0" {
+		t.Fatalf("client version %q", v)
+	}
 	bad := filepath.Join(dir, "bad.json")
 	if err := os.WriteFile(bad, []byte(`{"url":"http://x","password":"secret-pw"`), 0o600); err != nil {
 		t.Fatal(err)

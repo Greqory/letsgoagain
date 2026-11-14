@@ -70,10 +70,11 @@ def main():
     wait(lambda: "server password" in open(f"{SB}/serve.log").read(), 60, "opencode serve")
     pw = re.search(r"server password (\S+)", open(f"{SB}/serve.log").read()).group(1)
     auth = "Basic " + base64.b64encode(f"opencode:{pw}".encode()).decode()
+    oc_version = subprocess.run(["opencode", "--version"], capture_output=True, text=True).stdout.split()[-1].lstrip("v")
     svc = f"{SB}/lga/state/opencode/service.json"
     with open(os.open(svc, os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
-        json.dump({"id": "sandbox", "url": BASE, "pid": 0, "password": pw}, f)
-    say("opencode " + subprocess.run(["opencode", "--version"], capture_output=True, text=True).stdout.strip() + " serving")
+        json.dump({"id": "sandbox", "version": oc_version, "url": BASE, "pid": 0, "password": pw}, f)
+    say(f"opencode {oc_version} serving")
 
     lga_env = dict(os.environ, XDG_STATE_HOME=f"{SB}/lga/state", XDG_RUNTIME_DIR=f"{SB}/lga/run")
     daemon_log = f"{SB}/lga/daemon.log"

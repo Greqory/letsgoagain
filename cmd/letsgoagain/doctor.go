@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Greqory/letsgoagain/internal/compat"
 	"github.com/Greqory/letsgoagain/internal/daemon"
 	"github.com/Greqory/letsgoagain/internal/meridian"
 	"github.com/Greqory/letsgoagain/internal/opencode"
@@ -116,18 +117,19 @@ func (d doctor) run(ctx context.Context, w io.Writer) (failures int) {
 
 func (d doctor) checkOpenCode(ctx context.Context, svc opencode.Service, report func(string, verdict, string)) {
 	c := opencode.NewClient(svc)
-	version := svc.Version
-	if version == "" {
-		version = "unknown version"
-	}
+	note, tested := compat.Check("OpenCode", svc.Version, compat.TestedOpenCode)
 	ctx1, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 	if _, err := c.Running(ctx1, ""); err != nil {
-		report("OpenCode", fail, fmt.Sprintf("%s (%s) not answering: %v", svc.URL, version, err))
+		report("OpenCode", fail, fmt.Sprintf("%s not answering: %v (%s)", svc.URL, err, note))
 		report("event stream", fail, "needs the OpenCode service")
 		return
 	}
-	report("OpenCode", pass, fmt.Sprintf("%s, OpenCode %s", svc.URL, version))
+	v := pass
+	if !tested {
+		v = warn
+	}
+	report("OpenCode", v, fmt.Sprintf("%s, %s", svc.URL, note))
 
 	ctx2, cancel2 := context.WithTimeout(ctx, d.timeout)
 	defer cancel2()
@@ -147,12 +149,19 @@ func (d doctor) checkOpenCode(ctx context.Context, svc opencode.Service, report 
 func (d doctor) checkMeridian(ctx context.Context, report func(string, verdict, string)) {
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	q, err := meridian.NewClient(d.meridianURL).Quota(ctx)
+	m := meridian.NewClient(d.meridianURL)
+	q, err := m.Quota(ctx)
 	if err != nil {
 		report("meridian", warn, fmt.Sprintf("%v; without the quota, reset times come from retry_after or probing", err))
 		return
 	}
-	var parts []string
+	running, _ := m.Version(ctx)
+	note, tested := compat.Check("meridian", running, compat.TestedMeridian)
+	v := pass
+	if !tested {
+		v = warn
+	}
+	parts := []string{note}
 	for _, b := range q.Buckets {
 		if b.Utilization == nil || b.ResetsAt == nil {
 			continue
@@ -160,7 +169,7 @@ func (d doctor) checkMeridian(ctx context.Context, report func(string, verdict, 
 		parts = append(parts, fmt.Sprintf("%s %d%% (resets %s)", b.Type, int(*b.Utilization*100+0.5),
 			time.UnixMilli(*b.ResetsAt).Local().Format("Mon 15:04")))
 	}
-	report("meridian", pass, strings.Join(parts, ", "))
+	report("meridian", v, strings.Join(parts, "; "))
 }
 
 func (d doctor) checkService(report func(string, verdict, string)) {

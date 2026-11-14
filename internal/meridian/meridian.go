@@ -55,6 +55,30 @@ func NewClient(base string) *Client {
 	return &Client{base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 15 * time.Second}}
 }
 
+// Version reads meridian's version from /health. Only that field is decoded: /health also carries the
+// account's email, which LetsGoAgain has no business with.
+func (c *Client) Version(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/health", nil)
+	if err != nil {
+		return "", fmt.Errorf("version: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("version: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("version: status %d", resp.StatusCode)
+	}
+	var h struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil {
+		return "", fmt.Errorf("version: decode: %w", err)
+	}
+	return h.Version, nil
+}
+
 // Quota fetches the current quota.
 func (c *Client) Quota(ctx context.Context) (Quota, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/usage/quota", nil)

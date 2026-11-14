@@ -57,6 +57,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.messages(w)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/usage/quota":
 		s.quota(w)
+	case r.Method == http.MethodGet && r.URL.Path == "/health":
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"healthy","version":"1.79.0","backend":"claude"}`)
 	case r.Method == http.MethodPost && r.URL.Path == "/fake/limit":
 		var req struct {
 			Limited    bool `json:"limited"`

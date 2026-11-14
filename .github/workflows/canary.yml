@@ -1,20 +1,12 @@
-# The end-to-end check (tools/sandbox/e2e.py) against the newest OpenCode: weekly, so an OpenCode
-# update that changes how a limit stop looks shows up here and not as a missed night; and on pull
-# requests that touch what it covers.
+# The end-to-end check (tools/sandbox/e2e.py) against the newest OpenCode, weekly, so an OpenCode
+# update that changes how a limit stop looks shows up here and not as a missed night. By hand for a
+# branch: gh workflow run canary --ref <branch>. release.yml runs the same steps before every release.
 name: canary
 
 on:
   schedule:
     - cron: "17 5 * * 1" # Mondays, 05:17 UTC
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/canary.yml
-      - tools/sandbox/**
-      - tools/fakemeridian/**
-      - internal/fakemeridian/**
-      - internal/opencode/**
-      - internal/daemon/**
 
 permissions:
   contents: read

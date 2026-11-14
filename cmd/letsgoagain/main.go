@@ -23,6 +23,7 @@ const usage = `letsgoagain: let's go again after a Claude usage limit.
 Usage:
   letsgoagain daemon [--dry-run] [--meridian URL] [--message TEXT]
   letsgoagain status
+  letsgoagain doctor [--meridian URL]
   letsgoagain resume-now [SESSION_ID | --all]
   letsgoagain install [--dry-run]
   letsgoagain uninstall
@@ -41,6 +42,8 @@ func main() {
 		err = runDaemon(os.Args[2:])
 	case "status":
 		err = runStatus(os.Stdout)
+	case "doctor":
+		err = runDoctor(os.Stdout, os.Args[2:])
 	case "resume-now":
 		err = runResumeNow(os.Stdout, os.Args[2:])
 	case "install":

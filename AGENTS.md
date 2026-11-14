@@ -145,7 +145,10 @@ A reset time gets a 60 s margin before the resume.
   `internal/update` (self-update from GitHub releases), `internal/fakemeridian` (test double of meridian);
   `tools/fakemeridian/` (the double as a command for sandbox runs); `tools/check.sh` (the check set);
   `tools/sandbox/e2e.py` (the end-to-end run); `install.sh` (installer for users); `.github/workflows/`
-  (`ci.yml`: the check set on pushes and pull requests; `release.yml`: on a `v*.*.*` tag, checks, builds
+  (`ci.yml`: the check set on pushes and pull requests; `canary.yml`: `tools/sandbox/e2e.py` against the
+  newest OpenCode, weekly, by hand and on pull requests touching the daemon, the OpenCode client or the
+  sandbox; a failing canary means an OpenCode update changed something: read its log, fix, raise the tested
+  version; `release.yml`: on a `v*.*.*` tag, checks, builds
   `letsgoagain_linux_{amd64,arm64}` with `-X main.version=<tag>` and `checksums.txt`, publishes the
   release); `.github/dependabot.yml` (monthly updates of the workflows' actions; there are no Go module
   dependencies); `.github/rulesets/*.json` (the repo's rulesets as applied on GitHub: `main` cannot be

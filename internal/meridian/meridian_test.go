@@ -63,3 +63,22 @@ func TestClientMeasuredQuota(t *testing.T) {
 		t.Fatal("want an error for a 404")
 	}
 }
+
+func TestVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// The shape meridian 1.79.0 answers with, account details shortened.
+		w.Write([]byte(`{"status":"healthy","version":"1.79.0","backend":"claude","build":{"source":"npm","version":"1.79.0","latest":"1.89.0","updateAvailable":true},"auth":{"loggedIn":true,"email":"someone@example.com"}}`))
+	}))
+	defer srv.Close()
+	v, err := NewClient(srv.URL).Version(context.Background())
+	if err != nil || v != "1.79.0" {
+		t.Fatalf("got %q, %v", v, err)
+	}
+	if _, err := NewClient(srv.URL + "/nope").Version(context.Background()); err == nil {
+		t.Fatal("want an error for a 404")
+	}
+}

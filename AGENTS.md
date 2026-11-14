@@ -64,12 +64,19 @@ One Go program, `letsgoagain`, no OpenCode plugin.
   1. Reads `service.json`, connects to the service, subscribes to
      `session.execution.failed|started|succeeded`. Reconnects (re-reading `service.json`) every 30 s when the
      service is down or restarted.
-  2. On every (re)connect, scans recent root sessions with `outcome: "failed"` for limit stops it missed.
+  2. On every (re)connect, logs the OpenCode version (from `service.json`) and meridian's (the `version`
+     field of its `/health`, nothing else from it) against the tested ones in `internal/compat`, with a
+     warning when they differ (only when that changed since the last connect), and scans recent root
+     sessions with `outcome: "failed"` for limit stops it missed.
   3. A `session.execution.failed` with `provider.rate-limit` on a **root** session records a stop (child
      sessions are ignored: their parent fails too and is the one resumed).
   4. Checks the wall clock every 30 s (a laptop that slept through a reset resumes on wake); resumes due stops.
   5. `--dry-run` records and logs, sends nothing.
 - `letsgoagain status`: tracked stops, reset time and its source, attempts.
+- `letsgoagain doctor`: one line per dependency (the binary, the OpenCode service and its event stream,
+  meridian's quota, the systemd unit and which binary it runs, the daemon's socket), ok/WARN/FAIL with a
+  hint; exit 1 on a FAIL. Reads only; never prints the service password or meridian's `/health` (it holds
+  the account's email).
 - `letsgoagain resume-now [sessionID | --all]`: resume without waiting for the reset.
 - `letsgoagain install` / `uninstall`: write, enable and remove the systemd user unit; idempotent.
 - `letsgoagain update [--check]` / `version`: replace the binary with the latest GitHub release (checksum
@@ -137,7 +144,8 @@ A reset time gets a 60 s margin before the resume.
 - Resume a session earlier than its reset (apart from the user's `resume-now`), or more than 5 times per stop.
 - Point a sandbox run at the user's real service or meridian: sandboxes use their own `XDG_*` dirs,
   `tools/fakemeridian` and their own ports.
-- Push to a remote (the user pushes).
+- Push `main` or tags (the user does). Feature branches and pull requests only when the user asks for
+  them (user, 2026-11-14); the user merges.
 
 ## 6. Code and commands
 
@@ -145,7 +153,10 @@ A reset time gets a 60 s margin before the resume.
 - Layout: `cmd/letsgoagain/` (main, subcommands); `internal/opencode` (service discovery, API client, event
   stream, limit-error parsing), `internal/meridian` (quota), `internal/state` (stops and their file),
   `internal/reset` (reset-time decision), `internal/daemon` (event loop, scheduler, control socket),
-  `internal/update` (self-update from GitHub releases), `internal/fakemeridian` (test double of meridian);
+  `internal/update` (self-update from GitHub releases), `internal/compat` (the tested OpenCode and
+  meridian versions: raise `TestedOpenCode` after `tools/sandbox/e2e.py` passes on a new OpenCode,
+  `TestedMeridian` after a real limit stop worked with a new meridian, and the measured versions in §1),
+  `internal/fakemeridian` (test double of meridian);
   `tools/fakemeridian/` (the double as a command for sandbox runs); `tools/check.sh` (the check set);
   `tools/sandbox/e2e.py` (the end-to-end run); `install.sh` (installer for users); `.github/workflows/`
   (`ci.yml`: the check set on pushes and pull requests; `canary.yml`: `tools/sandbox/e2e.py` against the

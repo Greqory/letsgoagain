@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"github.com/Greqory/letsgoagain/internal/compat"
 	"github.com/Greqory/letsgoagain/internal/meridian"
 	"github.com/Greqory/letsgoagain/internal/opencode"
 	"github.com/Greqory/letsgoagain/internal/reset"
@@ -27,11 +29,17 @@ type API interface {
 	Running(ctx context.Context, id string) (bool, error)
 	Prompt(ctx context.Context, id, text string) error
 	Events(ctx context.Context, types []string, connected func(), handle func(opencode.Event) error) error
+	Version() string
 }
 
 // Quota reads meridian's quota.
 type Quota interface {
 	Quota(ctx context.Context) (meridian.Quota, error)
+}
+
+// versioned is a Quota that can also tell meridian's version.
+type versioned interface {
+	Version(ctx context.Context) (string, error)
 }
 
 // Config wires a daemon.
@@ -69,10 +77,11 @@ func (c *Config) defaults() {
 
 // Daemon watches and resumes.
 type Daemon struct {
-	cfg  Config
-	st   *state.State
-	api  API // nil while the service is unreachable
-	msgs chan any
+	cfg      Config
+	st       *state.State
+	api      API // nil while the service is unreachable
+	msgs     chan any
+	versions string // the last logged version notes, so a reconnect logs only changes
 }
 
 type connected struct{ api API }
@@ -168,6 +177,7 @@ func (d *Daemon) handle(ctx context.Context, m any) {
 	case connected:
 		d.api = m.api
 		d.cfg.Log.Printf("connected to the OpenCode service")
+		d.logVersions(ctx)
 		d.scan(ctx)
 	case disconnected:
 		d.api = nil
@@ -206,6 +216,36 @@ func (d *Daemon) event(ctx context.Context, ev opencode.Event) {
 			return // a subagent: its root fails too and is the one resumed
 		}
 		d.record(ctx, sess, l)
+	}
+}
+
+// logVersions notes the running OpenCode and meridian versions, with a warning when they differ from the
+// tested ones; only when that changed since the last connect.
+func (d *Daemon) logVersions(ctx context.Context) {
+	notes := []string{}
+	add := func(name, running, tested string) {
+		note, ok := compat.Check(name, running, tested)
+		if !ok {
+			note = "warning: " + note
+		}
+		notes = append(notes, note)
+	}
+	add("OpenCode", d.api.Version(), compat.TestedOpenCode)
+	if v, ok := d.cfg.Quota.(versioned); ok {
+		running, err := v.Version(ctx)
+		if err != nil {
+			d.cfg.Log.Printf("meridian version unavailable: %v", err)
+		} else {
+			add("meridian", running, compat.TestedMeridian)
+		}
+	}
+	joined := strings.Join(notes, "\n")
+	if joined == d.versions {
+		return
+	}
+	d.versions = joined
+	for _, n := range notes {
+		d.cfg.Log.Print(n)
 	}
 }
 

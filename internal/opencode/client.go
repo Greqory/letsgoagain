@@ -48,13 +48,18 @@ type Message struct {
 type Client struct {
 	base     string
 	password string
+	version  string
 	http     *http.Client
 }
 
 // NewClient builds a client for a service.
 func NewClient(s Service) *Client {
-	return &Client{base: strings.TrimRight(s.URL, "/"), password: s.Password, http: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{base: strings.TrimRight(s.URL, "/"), password: s.Password, version: s.Version,
+		http: &http.Client{Timeout: 30 * time.Second}}
 }
+
+// Version is the service's OpenCode version from service.json, "" when it has none.
+func (c *Client) Version() string { return c.version }
 
 // Session returns one session.
 func (c *Client) Session(ctx context.Context, id string) (Session, error) {

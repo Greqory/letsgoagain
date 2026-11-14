@@ -67,6 +67,10 @@ One Go program, `letsgoagain`, no OpenCode plugin.
   4. Checks the wall clock every 30 s (a laptop that slept through a reset resumes on wake); resumes due stops.
   5. `--dry-run` records and logs, sends nothing.
 - `letsgoagain status`: tracked stops, reset time and its source, attempts.
+- `letsgoagain doctor`: one line per dependency (the binary, the OpenCode service and its event stream,
+  meridian's quota, the systemd unit and which binary it runs, the daemon's socket), ok/WARN/FAIL with a
+  hint; exit 1 on a FAIL. Reads only; never prints the service password or meridian's `/health` (it holds
+  the account's email).
 - `letsgoagain resume-now [sessionID | --all]`: resume without waiting for the reset.
 - `letsgoagain install` / `uninstall`: write, enable and remove the systemd user unit; idempotent.
 - `letsgoagain update [--check]` / `version`: replace the binary with the latest GitHub release (checksum
@@ -134,7 +138,8 @@ A reset time gets a 60 s margin before the resume.
 - Resume a session earlier than its reset (apart from the user's `resume-now`), or more than 5 times per stop.
 - Point a sandbox run at the user's real service or meridian: sandboxes use their own `XDG_*` dirs,
   `tools/fakemeridian` and their own ports.
-- Push to a remote (the user pushes).
+- Push `main` or tags (the user does). Feature branches and pull requests only when the user asks for
+  them (user, 2026-11-14); the user merges.
 
 ## 6. Code and commands
 

@@ -85,6 +85,7 @@ Mostly you don't: start your agents and go to sleep. When you want to look:
 | Command | What it does |
 |---|---|
 | `letsgoagain status` | Every tracked stop: when it stopped, when it resumes, how many tries. |
+| `letsgoagain doctor` | Checks everything it depends on: OpenCode, its event stream, meridian's quota, the service, the daemon. |
 | `letsgoagain resume-now <session-id>` | Resume one stopped session right away. `--all` for every one. |
 | `letsgoagain update` | Update to the latest release (checks first; `--check` only tells you). |
 | `letsgoagain version` | Show the installed version. |
@@ -141,6 +142,17 @@ stop it gives up and shows that in `status`.
   `letsgoagain update` talks to GitHub, and only when you run it.
 
 ## Troubleshooting
+
+Start with `letsgoagain doctor`: one line per dependency, and a hint for each one that isn't fine.
+
+```
+ok    letsgoagain      v0.2.0 (/home/you/.local/bin/letsgoagain)
+ok    OpenCode         http://127.0.0.1:49374, OpenCode 2.3.0
+ok    event stream     subscribed
+ok    meridian         five_hour 51% (resets Sat 15:29), seven_day 65% (resets Mon 02:59)
+ok    service          active
+ok    daemon           answering, 0 open stops, 2 tracked
+```
 
 **`status` says the daemon is not running.** Look at `systemctl --user status letsgoagain` and the log.
 `letsgoagain install` starts it again.

@@ -105,6 +105,9 @@ def main():
     say(f"live: {sid} limited, quota resets in 120 s")
     wait(lambda: "limit stop recorded, reset from the meridian quota (five_hour)" in log(), 150, "stop recorded")
     say("live: stop recorded from the quota")
+    stops = json.load(open(f"{SB}/lga/state/letsgoagain/state.json"))["stops"]
+    if not stops.get(sid, {}).get("messageID", "").startswith("msg_") or "going by the event" in log():
+        fail(f"the stop was not taken from the session's messages: {stops.get(sid)}")
     inbox = lambda: call("GET", BASE + f"/api/session/{sid}/inbox", auth=auth)["data"]
     wait(lambda: len(inbox()) == 1, 10, "the TUI notice")
     desc = inbox()[0]["payload"].get("description", "")

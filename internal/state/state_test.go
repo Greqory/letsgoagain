@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,8 +16,8 @@ func plan(at time.Time) func() reset.Plan {
 	return func() reset.Plan { return reset.Plan{At: at, Source: reset.SourceRetryAfter} }
 }
 
-func limit(idle int64) Limit {
-	return Limit{SessionID: "ses_a", Title: "t", StoppedAt: time.UnixMilli(idle), Idle: idle, RetryAfter: 4868}
+func limit(at int64) Limit {
+	return Limit{SessionID: "ses_a", Title: "t", StoppedAt: time.UnixMilli(at), MessageID: fmt.Sprintf("msg_%d", at), RetryAfter: 4868}
 }
 
 func TestLifecycle(t *testing.T) {
@@ -29,16 +30,13 @@ func TestLifecycle(t *testing.T) {
 		t.Fatal("the same failure seen again must not be new")
 	}
 	st.MarkResumed(t0.Add(time.Hour))
-	if _, changed := s.Started("ses_a", t0); changed || st.Status != Resumed {
-		t.Fatal("our own resume starting the session must not close the stop")
-	}
 	// The resume hit the limit again: same stop, attempts kept.
 	st2, isNew := s.RecordLimit(limit(2000), t0, plan(t0.Add(2*time.Hour)))
 	if !isNew || st2 != st || st.Attempts != 1 || st.Status != Waiting {
 		t.Fatalf("repeat: %+v %v", st, isNew)
 	}
 	st.MarkResumed(t0)
-	if _, ok := s.Succeeded("ses_a", t0); !ok || st.Status != Done {
+	if _, ok := s.WentOn("ses_a", t0); !ok || st.Status != Done {
 		t.Fatalf("succeeded: %+v", st)
 	}
 	// A later limit after a success is a new stop.
@@ -51,10 +49,10 @@ func TestLifecycle(t *testing.T) {
 func TestMovedOn(t *testing.T) {
 	s := New()
 	s.RecordLimit(limit(1000), t0, plan(t0))
-	if st, ok := s.Started("ses_a", t0); !ok || st.Status != MovedOn {
+	if st, ok := s.WentOn("ses_a", t0); !ok || st.Status != MovedOn {
 		t.Fatalf("got %+v", st)
 	}
-	if _, ok := s.Succeeded("ses_a", t0); ok {
+	if _, ok := s.WentOn("ses_a", t0); ok {
 		t.Fatal("a closed stop does not change on success")
 	}
 }

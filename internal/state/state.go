@@ -33,11 +33,13 @@ const keepClosed = 7 * 24 * time.Hour
 
 // Stop is one session stopped by a usage limit.
 type Stop struct {
-	SessionID  string    `json:"sessionID"`
-	Title      string    `json:"title,omitempty"`
-	Directory  string    `json:"directory,omitempty"`
-	StoppedAt  time.Time `json:"stoppedAt"`
-	Idle       int64     `json:"idle"` // the session's time.idle at the stop: unchanged = nobody touched it
+	SessionID string    `json:"sessionID"`
+	Title     string    `json:"title,omitempty"`
+	Directory string    `json:"directory,omitempty"`
+	StoppedAt time.Time `json:"stoppedAt"`
+	// MessageID is the failed assistant message: while it is the session's newest real message (idle
+	// entries aside, opencode.StopOf), nobody went on.
+	MessageID  string    `json:"messageID"`
 	RetryAfter int       `json:"retryAfter,omitempty"`
 	NextAt     time.Time `json:"nextAt"`
 	Source     string    `json:"source"`
@@ -134,7 +136,7 @@ type Limit struct {
 	Title      string
 	Directory  string
 	StoppedAt  time.Time
-	Idle       int64
+	MessageID  string
 	RetryAfter int
 }
 
@@ -142,7 +144,7 @@ type Limit struct {
 // (the same failure seen again, e.g. by a scan) or the stop has used up its attempts.
 func (s *State) RecordLimit(l Limit, now time.Time, plan func() reset.Plan) (*Stop, bool) {
 	st := s.Stops[l.SessionID]
-	if st != nil && st.Open() && st.Idle == l.Idle {
+	if st != nil && st.Open() && st.MessageID == l.MessageID {
 		return st, false
 	}
 	if st == nil || !st.Open() {
@@ -150,7 +152,7 @@ func (s *State) RecordLimit(l Limit, now time.Time, plan func() reset.Plan) (*St
 		s.Stops[l.SessionID] = st
 	}
 	st.Title, st.Directory = l.Title, l.Directory
-	st.StoppedAt, st.Idle, st.RetryAfter = l.StoppedAt, l.Idle, l.RetryAfter
+	st.StoppedAt, st.MessageID, st.RetryAfter = l.StoppedAt, l.MessageID, l.RetryAfter
 	st.UpdatedAt = now
 	if st.Attempts >= MaxAttempts {
 		st.Status, st.Note = Failed, fmt.Sprintf("still limited after %d resumes", st.Attempts)
@@ -172,23 +174,19 @@ func (st *Stop) Plan() reset.Plan {
 	return reset.Plan{At: st.NextAt, Source: st.Source, Window: st.Window}
 }
 
-// Started handles a session that began executing: unless we resumed it, someone else did.
-func (s *State) Started(id string, now time.Time) (*Stop, bool) {
-	st := s.Stops[id]
-	if st == nil || st.Status != Waiting {
-		return st, false
-	}
-	st.Status, st.Note, st.UpdatedAt = MovedOn, "continued without LetsGoAgain", now
-	return st, true
-}
-
-// Succeeded closes an open stop of a session that ran successfully.
-func (s *State) Succeeded(id string, now time.Time) (*Stop, bool) {
+// WentOn closes an open stop of a session that has moved past it: done when LetsGoAgain resumed it,
+// moved on when someone else did. The caller has checked that the session really moved (StopOf).
+func (s *State) WentOn(id string, now time.Time) (*Stop, bool) {
 	st := s.Stops[id]
 	if st == nil || !st.Open() {
 		return st, false
 	}
-	st.Status, st.Note, st.UpdatedAt = Done, "", now
+	if st.Status == Resumed {
+		st.Status, st.Note = Done, ""
+	} else {
+		st.Status, st.Note = MovedOn, "continued without LetsGoAgain"
+	}
+	st.UpdatedAt = now
 	return st, true
 }
 

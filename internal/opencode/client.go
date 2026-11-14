@@ -80,19 +80,14 @@ func (c *Client) RootSessions(ctx context.Context, limit int) ([]Session, error)
 	return out.Data, err
 }
 
-// LatestMessage returns the newest message of a session.
-func (c *Client) LatestMessage(ctx context.Context, id string) (Message, error) {
+// RecentMessages returns a session's newest n messages, newest first.
+func (c *Client) RecentMessages(ctx context.Context, id string, n int) ([]Message, error) {
 	var out struct {
 		Data []Message `json:"data"`
 	}
-	q := url.Values{"limit": {"1"}, "order": {"desc"}}
-	if err := c.do(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id)+"/message?"+q.Encode(), nil, &out); err != nil {
-		return Message{}, err
-	}
-	if len(out.Data) == 0 {
-		return Message{}, fmt.Errorf("session %s: no messages", id)
-	}
-	return out.Data[0], nil
+	q := url.Values{"limit": {fmt.Sprint(n)}, "order": {"desc"}}
+	err := c.do(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id)+"/message?"+q.Encode(), nil, &out)
+	return out.Data, err
 }
 
 // Running reports whether a session is executing right now.

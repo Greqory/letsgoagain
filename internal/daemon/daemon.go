@@ -26,7 +26,7 @@ const DefaultMessage = "The Claude usage limit has reset. Continue where you lef
 type API interface {
 	Session(ctx context.Context, id string) (opencode.Session, error)
 	RootSessions(ctx context.Context, limit int) ([]opencode.Session, error)
-	LatestMessage(ctx context.Context, id string) (opencode.Message, error)
+	RecentMessages(ctx context.Context, id string, n int) ([]opencode.Message, error)
 	Running(ctx context.Context, id string) (bool, error)
 	Prompt(ctx context.Context, id, text string) error
 	AddNotice(ctx context.Context, id, description, text string) (string, error)
@@ -145,7 +145,9 @@ func (d *Daemon) tickLoop(ctx context.Context) {
 	}
 }
 
-var eventTypes = []string{opencode.EventExecutionFailed, opencode.EventExecutionStarted, opencode.EventExecutionSucceeded}
+// A started execution says nothing: OpenCode starts empty ones after a limit failure, and a real
+// continuation shows in the messages by the time it succeeds or fails.
+var eventTypes = []string{opencode.EventExecutionFailed, opencode.EventExecutionSucceeded}
 
 func (d *Daemon) connectLoop(ctx context.Context) {
 	lastErr := ""
@@ -197,20 +199,19 @@ func (d *Daemon) handle(ctx context.Context, m any) {
 
 func (d *Daemon) event(ctx context.Context, ev opencode.Event) {
 	id := ev.Data.SessionID
+	if d.api == nil {
+		return
+	}
 	switch ev.Type {
-	case opencode.EventExecutionStarted:
-		if st, ok := d.st.Started(id, d.cfg.Now()); ok {
-			d.clearNotice(ctx, st)
-			d.cfg.Log.Printf("%s: continued without LetsGoAgain, stop closed", d.name(st))
-		}
 	case opencode.EventExecutionSucceeded:
-		if st, ok := d.st.Succeeded(id, d.cfg.Now()); ok {
-			d.clearNotice(ctx, st)
-			d.cfg.Log.Printf("%s: running again, stop done", d.name(st))
+		// Not proof that the session went on: OpenCode sometimes runs an empty execution right after a
+		// limit failure. Only its messages tell.
+		if st := d.st.Stops[id]; st != nil && st.Open() {
+			d.checkWentOn(ctx, st)
 		}
 	case opencode.EventExecutionFailed:
 		l, ok := opencode.ParseLimit(ev.Data.Error)
-		if !ok || d.api == nil {
+		if !ok {
 			return
 		}
 		sess, err := d.api.Session(ctx, id)
@@ -221,7 +222,52 @@ func (d *Daemon) event(ctx context.Context, ev opencode.Event) {
 		if sess.ParentID != "" {
 			return // a subagent: its root fails too and is the one resumed
 		}
-		d.record(ctx, sess, l)
+		stop, ok := d.stopOf(ctx, id)
+		if !ok {
+			// The messages don't show it (yet): take the event's word; the check before a resume then
+			// accepts any limit stop it finds.
+			d.cfg.Log.Printf("%s: limit failure not (yet) in the session's messages; going by the event", id)
+			stop = opencode.LimitStop{At: d.cfg.Now().UnixMilli(), Limit: l}
+		}
+		d.record(ctx, sess, stop)
+	}
+}
+
+// stopOf reads where a session stands; false also when its messages cannot be read.
+func (d *Daemon) stopOf(ctx context.Context, id string) (opencode.LimitStop, bool) {
+	msgs, err := d.api.RecentMessages(ctx, id, 10)
+	if err != nil {
+		d.cfg.Log.Printf("%s: messages not readable: %v", id, err)
+		return opencode.LimitStop{}, false
+	}
+	return opencode.StopOf(msgs)
+}
+
+// sameStop reports whether the session still stands at the stop st recorded.
+func sameStop(st *state.Stop, stop opencode.LimitStop) bool {
+	return st.MessageID == "" || stop.MessageID == st.MessageID
+}
+
+// checkWentOn closes an open stop whose session has really moved past it.
+func (d *Daemon) checkWentOn(ctx context.Context, st *state.Stop) {
+	msgs, err := d.api.RecentMessages(ctx, st.SessionID, 10)
+	if err != nil {
+		d.cfg.Log.Printf("%s: messages not readable: %v", d.name(st), err)
+		return
+	}
+	if stop, ok := opencode.StopOf(msgs); ok {
+		if sameStop(st, stop) && st.Status == state.Waiting {
+			d.cfg.Log.Printf("%s: OpenCode ran an empty execution after the stop; still waiting", d.name(st))
+		}
+		return // still at this stop, or at a new one that its failure event records
+	}
+	if st, ok := d.st.WentOn(st.SessionID, d.cfg.Now()); ok {
+		d.clearNotice(ctx, st)
+		if st.Status == state.Done {
+			d.cfg.Log.Printf("%s: running again, stop done", d.name(st))
+		} else {
+			d.cfg.Log.Printf("%s: continued without LetsGoAgain, stop closed", d.name(st))
+		}
 	}
 }
 
@@ -264,36 +310,35 @@ func (d *Daemon) scan(ctx context.Context) {
 	}
 	since := d.cfg.Now().Add(-d.cfg.ScanWindow)
 	for _, s := range roots {
-		if st := d.st.Stops[s.ID]; st != nil && st.Open() && s.Outcome == "succeeded" {
-			d.st.Succeeded(s.ID, d.cfg.Now())
-			d.clearNotice(ctx, st)
-			d.cfg.Log.Printf("%s: ran successfully meanwhile, stop done", d.name(st))
+		st := d.st.Stops[s.ID]
+		open := st != nil && st.Open()
+		if !open && time.UnixMilli(s.Time.Updated).Before(since) {
 			continue
 		}
-		if s.Outcome != "failed" || time.UnixMilli(s.Time.Idle).Before(since) {
-			continue
-		}
-		m, err := d.api.LatestMessage(ctx, s.ID)
+		msgs, err := d.api.RecentMessages(ctx, s.ID, 10)
 		if err != nil {
 			d.cfg.Log.Printf("scan %s: %v", s.ID, err)
 			continue
 		}
-		if l, ok := opencode.ParseLimit(m.Error); ok {
-			d.record(ctx, s, l)
+		stop, atStop := opencode.StopOf(msgs)
+		switch {
+		case atStop && (!open || !sameStop(st, stop)) && !time.UnixMilli(stop.At).Before(since):
+			d.record(ctx, s, stop)
+		case open && !atStop:
+			if running, err := d.api.Running(ctx, s.ID); err == nil && !running {
+				d.checkWentOn(ctx, st)
+			}
 		}
 	}
 }
 
-func (d *Daemon) record(ctx context.Context, sess opencode.Session, l opencode.Limit) {
+func (d *Daemon) record(ctx context.Context, sess opencode.Session, stop opencode.LimitStop) {
 	now := d.cfg.Now()
-	stoppedAt := now
-	if sess.Time.Idle > 0 {
-		stoppedAt = time.UnixMilli(sess.Time.Idle)
-	}
+	stoppedAt := time.UnixMilli(stop.At)
 	lim := state.Limit{SessionID: sess.ID, Title: sess.Title, Directory: sess.Location.Directory,
-		StoppedAt: stoppedAt, Idle: sess.Time.Idle, RetryAfter: l.RetryAfter}
+		StoppedAt: stoppedAt, MessageID: stop.MessageID, RetryAfter: stop.Limit.RetryAfter}
 	st, isNew := d.st.RecordLimit(lim, now, func() reset.Plan {
-		return reset.Initial(now, stoppedAt, l.RetryAfter, d.exhausted(ctx))
+		return reset.Initial(now, stoppedAt, stop.Limit.RetryAfter, d.exhausted(ctx))
 	})
 	switch {
 	case isNew:
@@ -384,11 +429,21 @@ func (d *Daemon) resume(ctx context.Context, st *state.Stop, why string) error {
 	if err != nil {
 		return d.retryLater(st, err)
 	}
-	if running || sess.Outcome != "failed" || sess.Time.Idle != st.Idle {
+	msgs, err := d.api.RecentMessages(ctx, st.SessionID, 10)
+	if err != nil {
+		return d.retryLater(st, err)
+	}
+	stop, atStop := opencode.StopOf(msgs)
+	if running || !atStop {
 		st.Close(state.MovedOn, "session changed since the stop", now)
 		d.clearNotice(ctx, st)
 		d.cfg.Log.Printf("%s: skipped, the session moved on since the stop", d.name(st))
 		return errors.New("session moved on since the stop")
+	}
+	if !sameStop(st, stop) {
+		// It went on and stopped at the limit again without us seeing it: follow the newer stop.
+		d.record(ctx, sess, stop)
+		return errors.New("stopped at the limit again since; rescheduled")
 	}
 	if d.cfg.DryRun {
 		st.Close(state.DryRun, "would have resumed ("+why+")", now)

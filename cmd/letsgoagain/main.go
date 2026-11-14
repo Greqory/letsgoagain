@@ -26,6 +26,8 @@ Usage:
   letsgoagain resume-now [SESSION_ID | --all]
   letsgoagain install [--dry-run]
   letsgoagain uninstall
+  letsgoagain update [--check]
+  letsgoagain version
 `
 
 func main() {
@@ -45,6 +47,10 @@ func main() {
 		err = runInstall(os.Stdout, os.Args[2:])
 	case "uninstall":
 		err = runUninstall(os.Stdout)
+	case "update":
+		err = runUpdate(os.Stdout, os.Args[2:])
+	case "version", "--version":
+		fmt.Println("letsgoagain", currentVersion())
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -100,6 +106,7 @@ func runDaemon(args []string) error {
 	}
 	d, err := daemon.New(daemon.Config{
 		StatePath: filepath.Join(dir, "state.json"),
+		Version:   currentVersion(),
 		Connect: func() (daemon.API, error) {
 			s, err := opencode.ReadService(servicePath)
 			if err != nil {

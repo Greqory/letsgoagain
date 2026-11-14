@@ -37,6 +37,7 @@ type Quota interface {
 // Config wires a daemon.
 type Config struct {
 	StatePath  string
+	Version    string
 	Connect    func() (API, error) // reads service.json afresh each time
 	Quota      Quota
 	Log        *log.Logger
@@ -95,7 +96,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if d.cfg.DryRun {
 		mode = "dry run: recording only"
 	}
-	d.cfg.Log.Printf("started (%s), %d open stops", mode, d.openCount())
+	d.cfg.Log.Printf("started %s (%s), %d open stops", d.cfg.Version, mode, d.openCount())
 	go d.connectLoop(ctx)
 	go d.tickLoop(ctx)
 	for {

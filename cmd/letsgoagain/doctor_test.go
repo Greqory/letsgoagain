@@ -90,7 +90,7 @@ func TestDoctorAllGood(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ok    letsgoagain", "ok    OpenCode         " + w.service.URL + ", OpenCode 2.3.0", "ok    event stream     subscribed",
-		"ok    meridian         five_hour 52% (resets Sat 03:30)", "ok    service          active\n",
+		"ok    meridian         meridian 1.79.0 (tested: 1.79); five_hour 52% (resets Sat 03:30)", "ok    service          active\n",
 		"ok    daemon           answering, 1 open stops, 2 tracked",
 	} {
 		if !strings.Contains(out, want) {
@@ -113,6 +113,9 @@ func TestDoctorProblems(t *testing.T) {
 		{"wrong password", func(w *doctorWorld) {
 			writeFile(t, w.d.servicePath, fmt.Sprintf(`{"url":%q,"password":"nope"}`, w.service.URL))
 		}, "not answering", 2},
+		{"newer OpenCode", func(w *doctorWorld) {
+			writeFile(t, w.d.servicePath, fmt.Sprintf(`{"url":%q,"version":"2.4.0","password":"pw"}`, w.service.URL))
+		}, "OpenCode 2.4.0 is newer than the tested 2.3", 0},
 		{"event stream refused", func(w *doctorWorld) { w.events = http.StatusInternalServerError }, "FAIL  event stream     event stream: status 500", 1},
 		{"meridian down", func(w *doctorWorld) { w.d.meridianURL = "http://127.0.0.1:1" }, "WARN  meridian", 0},
 		{"not installed", func(w *doctorWorld) { w.d.unitPath += ".missing" }, "FAIL  service          not installed; run: letsgoagain install", 1},

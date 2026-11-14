@@ -147,12 +147,17 @@ Start with `letsgoagain doctor`: one line per dependency, and a hint for each on
 
 ```
 ok    letsgoagain      v0.2.0 (/home/you/.local/bin/letsgoagain)
-ok    OpenCode         http://127.0.0.1:49374, OpenCode 2.3.0
+ok    OpenCode         http://127.0.0.1:49374, OpenCode 2.3.0 (tested: 2.3)
 ok    event stream     subscribed
-ok    meridian         five_hour 51% (resets Sat 15:29), seven_day 65% (resets Mon 02:59)
+ok    meridian         meridian 1.79.0 (tested: 1.79); five_hour 51% (resets Sat 15:29); seven_day 65% (resets Mon 02:59)
 ok    service          active
 ok    daemon           answering, 0 open stops, 2 tracked
 ```
+
+**A WARN says OpenCode or meridian is newer than the tested version.** LetsGoAgain relies on how they
+report a limit; an update can change that. Most likely it still works. If a limit stop goes unnoticed,
+please open an issue with the versions `doctor` shows. The daemon log notes the versions too, at every
+change.
 
 **`status` says the daemon is not running.** Look at `systemctl --user status letsgoagain` and the log.
 `letsgoagain install` starts it again.

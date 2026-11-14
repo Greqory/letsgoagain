@@ -29,6 +29,8 @@ type API interface {
 	LatestMessage(ctx context.Context, id string) (opencode.Message, error)
 	Running(ctx context.Context, id string) (bool, error)
 	Prompt(ctx context.Context, id, text string) error
+	AddNotice(ctx context.Context, id, description, text string) (string, error)
+	CancelNotice(ctx context.Context, id, inboxID string) error
 	Events(ctx context.Context, types []string, connected func(), handle func(opencode.Event) error) error
 	Version() string
 }
@@ -51,6 +53,7 @@ type Config struct {
 	Quota      Quota
 	Log        *log.Logger
 	DryRun     bool
+	NoNotice   bool // no "continues automatically at …" line in the TUI
 	Message    string
 	Now        func() time.Time
 	Tick       time.Duration // wall-clock check
@@ -197,10 +200,12 @@ func (d *Daemon) event(ctx context.Context, ev opencode.Event) {
 	switch ev.Type {
 	case opencode.EventExecutionStarted:
 		if st, ok := d.st.Started(id, d.cfg.Now()); ok {
+			d.clearNotice(ctx, st)
 			d.cfg.Log.Printf("%s: continued without LetsGoAgain, stop closed", d.name(st))
 		}
 	case opencode.EventExecutionSucceeded:
 		if st, ok := d.st.Succeeded(id, d.cfg.Now()); ok {
+			d.clearNotice(ctx, st)
 			d.cfg.Log.Printf("%s: running again, stop done", d.name(st))
 		}
 	case opencode.EventExecutionFailed:
@@ -261,6 +266,7 @@ func (d *Daemon) scan(ctx context.Context) {
 	for _, s := range roots {
 		if st := d.st.Stops[s.ID]; st != nil && st.Open() && s.Outcome == "succeeded" {
 			d.st.Succeeded(s.ID, d.cfg.Now())
+			d.clearNotice(ctx, st)
 			d.cfg.Log.Printf("%s: ran successfully meanwhile, stop done", d.name(st))
 			continue
 		}
@@ -292,9 +298,42 @@ func (d *Daemon) record(ctx context.Context, sess opencode.Session, l opencode.L
 	switch {
 	case isNew:
 		d.cfg.Log.Printf("%s: limit stop recorded, %s", d.name(st), describePlan(st.Plan(), st.Attempts))
+		d.showNotice(ctx, st)
 	case st.Status == state.Failed:
+		d.clearNotice(ctx, st)
 		d.cfg.Log.Printf("%s: %s, giving up", d.name(st), st.Note)
 	}
+}
+
+// showNotice puts (or updates) the line in the session's TUI that says when it continues.
+func (d *Daemon) showNotice(ctx context.Context, st *state.Stop) {
+	if d.cfg.NoNotice || d.cfg.DryRun || d.api == nil || (st.NoticeID != "" && st.NoticeFor.Equal(st.NextAt)) {
+		return
+	}
+	d.clearNotice(ctx, st)
+	when := st.NextAt.Local().Format("Mon 15:04")
+	desc := "LetsGoAgain · Claude limit reached · continues automatically " + when
+	if st.Source == reset.SourceProbe {
+		desc = "LetsGoAgain · Claude limit reached · reset unknown, checking again " + when
+	}
+	text := "Note from LetsGoAgain: this session stopped at the Claude usage limit and was set to continue automatically after the reset (" + when + ")."
+	id, err := d.api.AddNotice(ctx, st.SessionID, desc, text)
+	if err != nil {
+		d.cfg.Log.Printf("%s: TUI notice not shown: %v", d.name(st), err)
+		return
+	}
+	st.NoticeID, st.NoticeFor = id, st.NextAt
+}
+
+// clearNotice removes the line again, so the agent never receives it.
+func (d *Daemon) clearNotice(ctx context.Context, st *state.Stop) {
+	if st.NoticeID == "" || d.api == nil {
+		return
+	}
+	if err := d.api.CancelNotice(ctx, st.SessionID, st.NoticeID); err != nil && !errors.Is(err, opencode.ErrNotFound) {
+		d.cfg.Log.Printf("%s: TUI notice not removed: %v", d.name(st), err)
+	}
+	st.NoticeID, st.NoticeFor = "", time.Time{}
 }
 
 func (d *Daemon) exhausted(ctx context.Context) reset.Exhausted {
@@ -321,6 +360,7 @@ func (d *Daemon) due(ctx context.Context) {
 			st.SetPlan(next)
 			st.UpdatedAt = now
 			d.cfg.Log.Printf("%s: still limited, %s", d.name(st), describePlan(next, st.Attempts))
+			d.showNotice(ctx, st)
 			continue
 		}
 		d.resume(ctx, st, "reset reached")
@@ -333,6 +373,7 @@ func (d *Daemon) resume(ctx context.Context, st *state.Stop, why string) error {
 	sess, err := d.api.Session(ctx, st.SessionID)
 	if errors.Is(err, opencode.ErrNotFound) {
 		st.Close(state.Gone, "session no longer exists", now)
+		st.NoticeID, st.NoticeFor = "", time.Time{}
 		d.cfg.Log.Printf("%s: session gone, stop closed", d.name(st))
 		return err
 	}
@@ -345,6 +386,7 @@ func (d *Daemon) resume(ctx context.Context, st *state.Stop, why string) error {
 	}
 	if running || sess.Outcome != "failed" || sess.Time.Idle != st.Idle {
 		st.Close(state.MovedOn, "session changed since the stop", now)
+		d.clearNotice(ctx, st)
 		d.cfg.Log.Printf("%s: skipped, the session moved on since the stop", d.name(st))
 		return errors.New("session moved on since the stop")
 	}
@@ -353,6 +395,8 @@ func (d *Daemon) resume(ctx context.Context, st *state.Stop, why string) error {
 		d.cfg.Log.Printf("%s: dry run, would resume now (%s)", d.name(st), why)
 		return nil
 	}
+	// Before the prompt: a queued notice would otherwise be delivered to the agent along with it.
+	d.clearNotice(ctx, st)
 	if err := d.api.Prompt(ctx, st.SessionID, d.cfg.Message); err != nil {
 		return d.retryLater(st, err)
 	}

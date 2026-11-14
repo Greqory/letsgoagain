@@ -25,11 +25,9 @@ func unitPath() (string, error) {
 	return filepath.Join(dir, "systemd", "user", unitName), nil
 }
 
-func unitFile(binary string, dryRun bool) string {
-	args := "daemon"
-	if dryRun {
-		args += " --dry-run"
-	}
+// unitFile is the systemd unit running binary's daemon with the given daemon flags.
+func unitFile(binary string, flags ...string) string {
+	args := strings.Join(append([]string{"daemon"}, flags...), " ")
 	return fmt.Sprintf(`[Unit]
 Description=LetsGoAgain: resumes OpenCode sessions after a Claude usage limit
 
@@ -62,8 +60,16 @@ func systemctl(args ...string) error {
 func runInstall(w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "install the daemon in dry-run mode (records, sends nothing)")
+	noNotice := fs.Bool("no-notice", false, "no \"continues automatically at …\" line in the TUI")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var flags []string
+	if *dryRun {
+		flags = append(flags, "--dry-run")
+	}
+	if *noNotice {
+		flags = append(flags, "--no-notice")
 	}
 	binary, err := os.Executable()
 	if err != nil {
@@ -82,7 +88,7 @@ func runInstall(w io.Writer, args []string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("unit dir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(unitFile(binary, *dryRun)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(unitFile(binary, flags...)), 0o644); err != nil {
 		return fmt.Errorf("write unit: %w", err)
 	}
 	if err := systemctl("daemon-reload"); err != nil {

@@ -105,12 +105,23 @@ def main():
     say(f"live: {sid} limited, quota resets in 120 s")
     wait(lambda: "limit stop recorded, reset from the meridian quota (five_hour)" in log(), 150, "stop recorded")
     say("live: stop recorded from the quota")
+    inbox = lambda: call("GET", BASE + f"/api/session/{sid}/inbox", auth=auth)["data"]
+    wait(lambda: len(inbox()) == 1, 10, "the TUI notice")
+    desc = inbox()[0]["payload"].get("description", "")
+    if not desc.startswith("LetsGoAgain · Claude limit reached · continues automatically "):
+        fail(f"notice description: {desc!r}")
+    say(f"live: TUI notice queued: {desc!r}")
     call("POST", FAKE + "/fake/limit", {"limited": False})
     wait(lambda: "resume sent (reset reached" in log(), 240, "resume")
     if time.time() * 1000 < reset_ms:
         fail("resumed before the reset")
     wait(lambda: outcome(sid) == "succeeded" and "running again, stop done" in log(), 60, "success")
-    say("live: resumed after the reset, session succeeded")
+    if inbox():
+        fail(f"notice left in the inbox: {inbox()}")
+    texts = json.dumps(call("GET", BASE + f"/api/session/{sid}/message?limit=20", auth=auth)["data"])
+    if "Note from LetsGoAgain" in texts:
+        fail("the notice reached the agent")
+    say("live: resumed after the reset, notice removed first, session succeeded")
 
     # 2. missed while the daemon was off
     d.terminate()

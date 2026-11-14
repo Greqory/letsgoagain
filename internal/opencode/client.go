@@ -112,6 +112,27 @@ func (c *Client) Prompt(ctx context.Context, id, text string) error {
 	return c.do(ctx, http.MethodPost, "/api/session/"+url.PathEscape(id)+"/prompt", map[string]string{"text": text}, nil)
 }
 
+// AddNotice queues a note in a session without running it (a synthetic input with resume false). The
+// TUI shows the description as a line under the session; the text reaches the agent only if the item is
+// delivered, which cancelling it before the next prompt prevents. Returns the inbox item's ID.
+func (c *Client) AddNotice(ctx context.Context, id, description, text string) (string, error) {
+	var out struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	body := map[string]any{"text": text, "description": description, "resume": false}
+	if err := c.do(ctx, http.MethodPost, "/api/session/"+url.PathEscape(id)+"/synthetic", body, &out); err != nil {
+		return "", err
+	}
+	return out.Data.ID, nil
+}
+
+// CancelNotice removes a queued note; one already delivered or gone is a no-op for the service.
+func (c *Client) CancelNotice(ctx context.Context, id, inboxID string) error {
+	return c.do(ctx, http.MethodDelete, "/api/session/"+url.PathEscape(id)+"/inbox/"+url.PathEscape(inboxID), nil, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader
 	if body != nil {

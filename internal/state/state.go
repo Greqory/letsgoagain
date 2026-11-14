@@ -46,6 +46,9 @@ type Stop struct {
 	Status     string    `json:"status"`
 	Note       string    `json:"note,omitempty"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+	// NoticeID is the inbox item showing the stop in the TUI; NoticeFor the time it announces.
+	NoticeID  string    `json:"noticeID,omitempty"`
+	NoticeFor time.Time `json:"noticeFor,omitempty"`
 }
 
 // Open reports whether the stop still needs LetsGoAgain.

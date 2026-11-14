@@ -21,11 +21,11 @@ import (
 const usage = `letsgoagain: let's go again after a Claude usage limit.
 
 Usage:
-  letsgoagain daemon [--dry-run] [--meridian URL] [--message TEXT]
+  letsgoagain daemon [--dry-run] [--no-notice] [--meridian URL] [--message TEXT]
   letsgoagain status
   letsgoagain doctor [--meridian URL]
   letsgoagain resume-now [SESSION_ID | --all]
-  letsgoagain install [--dry-run]
+  letsgoagain install [--dry-run] [--no-notice]
   letsgoagain uninstall
   letsgoagain update [--check]
   letsgoagain version
@@ -80,6 +80,7 @@ func stateDir() (string, error) {
 func runDaemon(args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "record and log stops, never send anything")
+	noNotice := fs.Bool("no-notice", false, "no \"continues automatically at …\" line in the TUI")
 	meridianURL := fs.String("meridian", meridian.DefaultURL, "meridian proxy URL (for the quota)")
 	message := fs.String("message", daemon.DefaultMessage, "text a resumed session receives")
 	if err := fs.Parse(args); err != nil {
@@ -117,10 +118,11 @@ func runDaemon(args []string) error {
 			}
 			return opencode.NewClient(s), nil
 		},
-		Quota:   meridian.NewClient(*meridianURL),
-		Log:     logger,
-		DryRun:  *dryRun,
-		Message: *message,
+		Quota:    meridian.NewClient(*meridianURL),
+		Log:      logger,
+		DryRun:   *dryRun,
+		NoNotice: *noNotice,
+		Message:  *message,
 	})
 	if err != nil {
 		return err

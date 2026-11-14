@@ -91,7 +91,8 @@ func fakeService(t *testing.T, h http.HandlerFunc) *Client {
 }
 
 func TestClient(t *testing.T) {
-	var prompted string
+	var prompted, noticed string
+	var cancelled bool
 	c := fakeService(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/session/ses_e28fa4af7ffeqz7CiHBYs0EJ3B" && r.Method == http.MethodGet:
@@ -105,6 +106,13 @@ func TestClient(t *testing.T) {
 			b, _ := io.ReadAll(r.Body)
 			prompted = string(b)
 			w.Write([]byte(`{"data":{}}`))
+		case r.URL.Path == "/api/session/ses_e28fa4af7ffeqz7CiHBYs0EJ3B/synthetic" && r.Method == http.MethodPost:
+			b, _ := io.ReadAll(r.Body)
+			noticed = string(b)
+			w.Write([]byte(`{"data":{"id":"msg_notice1","type":"synthetic","delivery":"steer"}}`))
+		case r.URL.Path == "/api/session/ses_e28fa4af7ffeqz7CiHBYs0EJ3B/inbox/msg_notice1" && r.Method == http.MethodDelete:
+			cancelled = true
+			w.Write([]byte(`{"data":null}`))
 		case r.URL.Path == "/api/session/active":
 			w.Write([]byte(`{"data":{"ses_busy":{"type":"running"}}}`))
 		case r.URL.Path == "/api/session" && r.Method == http.MethodGet:
@@ -132,6 +140,13 @@ func TestClient(t *testing.T) {
 	}
 	if err := c.Prompt(ctx, id, "Continue where you left off."); err != nil || prompted != `{"text":"Continue where you left off."}` {
 		t.Fatalf("prompt: %q, %v", prompted, err)
+	}
+	inboxID, err := c.AddNotice(ctx, id, "LetsGoAgain · note", "text")
+	if err != nil || inboxID != "msg_notice1" || noticed != `{"description":"LetsGoAgain · note","resume":false,"text":"text"}` {
+		t.Fatalf("notice: %q %q %v", inboxID, noticed, err)
+	}
+	if err := c.CancelNotice(ctx, id, inboxID); err != nil || !cancelled {
+		t.Fatalf("cancel notice: %v %v", cancelled, err)
 	}
 	if busy, err := c.Running(ctx, "ses_busy"); err != nil || !busy {
 		t.Fatalf("running busy: %v, %v", busy, err)

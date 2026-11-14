@@ -138,7 +138,8 @@ A reset time gets a 60 s margin before the resume.
 - Resume a session earlier than its reset (apart from the user's `resume-now`), or more than 5 times per stop.
 - Point a sandbox run at the user's real service or meridian: sandboxes use their own `XDG_*` dirs,
   `tools/fakemeridian` and their own ports.
-- Push to a remote (the user pushes).
+- Push `main` or tags (the user does). Feature branches and pull requests only when the user asks for
+  them (user, 2026-11-14); the user merges.
 
 ## 6. Code and commands
 

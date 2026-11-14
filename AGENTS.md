@@ -24,6 +24,9 @@ Out of scope: other agents, other providers, multiple machines, GUI, telemetry, 
 
 ## 2. Facts it is built on (measured 2026-11-13, sandbox: real OpenCode 2.3.0 + `tools/fakemeridian`)
 
+- **OpenCode 2 has its own installer**: `curl -fsSL https://opencode.ai/v2/install | bash`. The plain
+  `opencode.ai/install` and npm's `opencode-ai@latest` install OpenCode 1 (1.19.5 on 2026-11-14), which has
+  no shared service and no v2 API (the first canary run failed on exactly that).
 - **OpenCode v2 runs one shared service** (`opencode serve --service`); every TUI is a client of it, and
   plugins and meridian run inside it. `~/.local/state/opencode/service.json` holds
   `{id, version, url, pid, password}`; the API takes HTTP Basic auth, user `opencode`, that password. The
@@ -156,7 +159,10 @@ A reset time gets a 60 s margin before the resume.
   `internal/fakemeridian` (test double of meridian);
   `tools/fakemeridian/` (the double as a command for sandbox runs); `tools/check.sh` (the check set);
   `tools/sandbox/e2e.py` (the end-to-end run); `install.sh` (installer for users); `.github/workflows/`
-  (`ci.yml`: the check set on pushes and pull requests; `release.yml`: on a `v*.*.*` tag, checks, builds
+  (`ci.yml`: the check set on pushes and pull requests; `canary.yml`: `tools/sandbox/e2e.py` against the
+  newest OpenCode, weekly, by hand and on pull requests touching the daemon, the OpenCode client or the
+  sandbox; a failing canary means an OpenCode update changed something: read its log, fix, raise the tested
+  version; `release.yml`: on a `v*.*.*` tag, checks, builds
   `letsgoagain_linux_{amd64,arm64}` with `-X main.version=<tag>` and `checksums.txt`, publishes the
   release); `.github/dependabot.yml` (monthly updates of the workflows' actions; there are no Go module
   dependencies); `.github/rulesets/*.json` (the repo's rulesets as applied on GitHub: `main` cannot be

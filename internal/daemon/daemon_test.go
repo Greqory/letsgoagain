@@ -564,9 +564,12 @@ func TestControlOverSocket(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "s.sock")
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.d.Run(ctx)
-	go h.d.Serve(ctx, sock)
+	runDone, serveDone := make(chan struct{}), make(chan struct{})
+	go func() { h.d.Run(ctx); close(runDone) }()
+	go func() { h.d.Serve(ctx, sock); close(serveDone) }()
+	// Cleanups run last-in first-out: this one ends both before the state's TempDir is removed, which
+	// otherwise races a final state save (seen once in 200 runs).
+	t.Cleanup(func() { cancel(); <-runDone; <-serveDone })
 	c := NewControl(sock)
 	var stops []state.Stop
 	for i := 0; i < 100; i++ {

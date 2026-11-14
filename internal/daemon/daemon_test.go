@@ -30,12 +30,54 @@ type fakeAPI struct {
 	prompts   []string
 	promptErr error
 	version   string
+	inbox     map[string]string // inbox ID → description
+	noticeErr error
+	calls     []string // "notice <desc>", "cancel <id>", "prompt <session>", in order
+	nextID    int
+}
+
+func (f *fakeAPI) AddNotice(_ context.Context, id, description, text string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.noticeErr != nil {
+		return "", f.noticeErr
+	}
+	if !strings.Contains(text, "LetsGoAgain") {
+		return "", fmt.Errorf("notice text %q does not name LetsGoAgain", text)
+	}
+	f.nextID++
+	inboxID := fmt.Sprintf("msg_notice%d", f.nextID)
+	f.inbox[inboxID] = description
+	f.calls = append(f.calls, "notice "+description)
+	return inboxID, nil
+}
+
+func (f *fakeAPI) CancelNotice(_ context.Context, _, inboxID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "cancel "+inboxID)
+	if _, ok := f.inbox[inboxID]; !ok {
+		return fmt.Errorf("DELETE inbox: %w", opencode.ErrNotFound)
+	}
+	delete(f.inbox, inboxID)
+	return nil
+}
+
+func (f *fakeAPI) inboxDescriptions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, d := range f.inbox {
+		out = append(out, d)
+	}
+	return out
 }
 
 func (f *fakeAPI) Version() string { return f.version }
 
 func newFakeAPI() *fakeAPI {
-	return &fakeAPI{sessions: map[string]opencode.Session{}, latest: map[string]opencode.Message{}, running: map[string]bool{}}
+	return &fakeAPI{sessions: map[string]opencode.Session{}, latest: map[string]opencode.Message{}, running: map[string]bool{},
+		inbox: map[string]string{}}
 }
 
 func (f *fakeAPI) addFailed(id, parent string, idle time.Time) {
@@ -89,6 +131,7 @@ func (f *fakeAPI) Prompt(_ context.Context, id, text string) error {
 		return f.promptErr
 	}
 	f.prompts = append(f.prompts, id+": "+text)
+	f.calls = append(f.calls, "prompt "+id)
 	return nil
 }
 
@@ -138,15 +181,20 @@ type harness struct {
 var stopTime = time.Date(2026, 11, 13, 1, 37, 0, 0, time.UTC)
 
 func newHarness(t *testing.T, dryRun bool) *harness {
+	return newHarnessWith(t, func(c *Config) { c.DryRun = dryRun })
+}
+
+func newHarnessWith(t *testing.T, configure func(*Config)) *harness {
 	h := &harness{t: t, api: newFakeAPI(), quota: &fakeQuota{}, now: stopTime.Add(5 * time.Second), log: &bytes.Buffer{}}
-	d, err := New(Config{
+	cfg := Config{
 		StatePath: filepath.Join(t.TempDir(), "state.json"),
 		Connect:   func() (API, error) { return h.api, nil },
 		Quota:     h.quota,
 		Log:       log.New(h.log, "", 0),
-		DryRun:    dryRun,
 		Now:       func() time.Time { return h.now },
-	})
+	}
+	configure(&cfg)
+	d, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,6 +430,102 @@ func TestScanOnConnect(t *testing.T) {
 	h.d.handle(context.Background(), connected{h.api})
 	if st := h.stop("ses_recent"); st.Status != state.Done {
 		t.Fatalf("after a success seen by the scan: %+v", st)
+	}
+}
+
+func notice(at time.Time) string {
+	return "LetsGoAgain · Claude limit reached · continues automatically " + at.Local().Format("Mon 15:04")
+}
+
+func TestNoticeLifecycle(t *testing.T) {
+	h := newHarness(t, false)
+	h.quota.err = errors.New("down")
+	h.api.addFailed("ses_a", "", stopTime)
+	h.event(opencode.EventExecutionFailed, "ses_a")
+	st := h.stop("ses_a")
+	first := st.NextAt
+	if got := h.api.inboxDescriptions(); len(got) != 1 || got[0] != notice(first) || st.NoticeID == "" {
+		t.Fatalf("notice at the stop: %v, stop %+v", got, st)
+	}
+
+	// Due, but the quota now names a later reset: the notice moves with it.
+	weekly := stopTime.Add(49 * time.Hour)
+	h.quota.spent("seven_day", weekly)
+	h.at(first)
+	if got := h.api.inboxDescriptions(); len(got) != 1 || got[0] != notice(weekly.Add(reset.Margin)) {
+		t.Fatalf("notice after the reschedule: %v", got)
+	}
+
+	// The resume: the notice is gone before the prompt goes out.
+	h.quota.clear()
+	h.at(weekly.Add(reset.Margin))
+	n := len(h.api.calls)
+	if n < 2 || !strings.HasPrefix(h.api.calls[n-2], "cancel ") || h.api.calls[n-1] != "prompt ses_a" || len(h.api.inboxDescriptions()) != 0 {
+		t.Fatalf("calls %v, inbox %v", h.api.calls, h.api.inboxDescriptions())
+	}
+	if st.NoticeID != "" {
+		t.Fatalf("stop still points at a notice: %+v", st)
+	}
+}
+
+func TestNoticeRemovedWhenTheStopEndsOtherwise(t *testing.T) {
+	for name, end := range map[string]func(h *harness){
+		"continued by hand": func(h *harness) { h.event(opencode.EventExecutionStarted, "ses_a") },
+		"changed unseen": func(h *harness) {
+			h.api.addFailed("ses_a", "", stopTime.Add(time.Minute))
+			h.at(stopTime.Add(6 * time.Hour))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, false)
+			h.api.addFailed("ses_a", "", stopTime)
+			h.event(opencode.EventExecutionFailed, "ses_a")
+			end(h)
+			if st := h.stop("ses_a"); st.Status != state.MovedOn || len(h.api.inboxDescriptions()) != 0 || h.api.promptCount() != 0 {
+				t.Fatalf("stop %+v, inbox %v", st, h.api.inboxDescriptions())
+			}
+		})
+	}
+}
+
+func TestNoNoticeWhenDisabledOrDryRun(t *testing.T) {
+	for name, configure := range map[string]func(*Config){
+		"--no-notice": func(c *Config) { c.NoNotice = true },
+		"--dry-run":   func(c *Config) { c.DryRun = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarnessWith(t, configure)
+			h.api.addFailed("ses_a", "", stopTime)
+			h.event(opencode.EventExecutionFailed, "ses_a")
+			if len(h.api.calls) != 0 {
+				t.Fatalf("calls %v", h.api.calls)
+			}
+		})
+	}
+}
+
+func TestNoticeFailureDoesNotStopTheResume(t *testing.T) {
+	h := newHarness(t, false)
+	h.api.noticeErr = errors.New("status 500")
+	h.api.addFailed("ses_a", "", stopTime)
+	h.event(opencode.EventExecutionFailed, "ses_a")
+	h.at(h.stop("ses_a").NextAt)
+	if h.api.promptCount() != 1 || !strings.Contains(h.log.String(), "TUI notice not shown") {
+		t.Fatalf("prompts %d; log:\n%s", h.api.promptCount(), h.log)
+	}
+}
+
+func TestProbeNotice(t *testing.T) {
+	h := newHarness(t, false)
+	h.api.addFailed("ses_a", "", stopTime)
+	h.api.latest["ses_a"] = opencode.Message{}
+	ev := opencode.Event{Type: opencode.EventExecutionFailed}
+	ev.Data.SessionID = "ses_a"
+	ev.Data.Error = json.RawMessage(`{"type":"provider.rate-limit","message":"m","response":{"body":"{}"}}`)
+	h.d.handle(context.Background(), eventMsg{ev})
+	want := "LetsGoAgain · Claude limit reached · reset unknown, checking again " + h.stop("ses_a").NextAt.Local().Format("Mon 15:04")
+	if got := h.api.inboxDescriptions(); len(got) != 1 || got[0] != want {
+		t.Fatalf("got %v, want %q", got, want)
 	}
 }
 

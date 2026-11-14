@@ -99,6 +99,19 @@ Everything it decides is written to `~/.local/state/letsgoagain/letsgoagain.log`
 tail -f ~/.local/state/letsgoagain/letsgoagain.log
 ```
 
+### See it right in OpenCode
+
+When a session stops at the limit, LetsGoAgain puts a line under it in the OpenCode TUI:
+
+```
+◈ LetsGoAgain · Claude limit reached · continues automatically Sat 03:31
+```
+
+So you know at a glance that it's taken care of, and when it goes on. If the reset time changes (say the
+weekly limit turns out to be the one that's spent), the line changes with it. It's removed right before
+the session continues, so your agent never sees it. If you don't want the line:
+`letsgoagain install --no-notice`.
+
 ### Already at the limit? Queue tonight's work anyway
 
 It's late, you just hit the limit, and you want the night's window for a big batch. You don't need to
@@ -117,8 +130,9 @@ Before you go to bed, give it two minutes and check:
 letsgoagain status
 ```
 
-The new session should show as `waiting`, with a reset from `quota five_hour`. You can close the
-terminal; the session lives on in OpenCode's background service. Two things to know:
+The new session should show as `waiting`, with a reset from `quota five_hour`, and the session itself
+shows the "continues automatically" line. You can close the terminal; the session lives on in OpenCode's
+background service. Two things to know:
 
 - If `status` says `seven_day`, the **weekly** limit is spent and the reset may be days away.
 - Write the task so it runs without questions or permission prompts: a session waiting for your answer
@@ -153,7 +167,8 @@ rm -rf ~/.local/state/letsgoagain      # its state and log
    - if neither is known, it checks the quota again every 15 minutes (at most 5 hours).
 4. **It waits**, checking the clock every 30 seconds, so a laptop that slept through the reset resumes
    as soon as it wakes.
-5. **It resumes**, one minute after the reset, but only if the session is exactly as the limit left it.
+5. **It resumes**, one minute after the reset (first removing its line from the TUI), but only if the
+   session is exactly as the limit left it.
    If you already continued it yourself, LetsGoAgain stays out of the way.
 
 If a resumed session runs into the limit again, it waits for the next reset. After 5 tries for the same

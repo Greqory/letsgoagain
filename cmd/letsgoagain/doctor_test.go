@@ -56,7 +56,7 @@ func newDoctorWorld(t *testing.T) *doctorWorld {
 	t.Cleanup(ms.Close)
 
 	unit := filepath.Join(dir, "letsgoagain.service")
-	writeFile(t, unit, unitFile("/opt/bin/letsgoagain", false))
+	writeFile(t, unit, unitFile("/opt/bin/letsgoagain"))
 	w.d = doctor{
 		self: "/opt/bin/letsgoagain", servicePath: servicePath, meridianURL: ms.URL, unitPath: unit,
 		timeout:  2 * time.Second,
@@ -142,7 +142,7 @@ func TestDoctorProblems(t *testing.T) {
 
 func TestDoctorDryRunUnit(t *testing.T) {
 	w := newDoctorWorld(t)
-	writeFile(t, w.d.unitPath, unitFile("/opt/bin/letsgoagain", true))
+	writeFile(t, w.d.unitPath, unitFile("/opt/bin/letsgoagain", "--dry-run"))
 	if out, _ := w.run(t); !strings.Contains(out, "ok    service          active, dry run: records only, sends nothing") {
 		t.Fatalf("got:\n%s", out)
 	}
@@ -154,9 +154,9 @@ func TestUnitExec(t *testing.T) {
 		bin    string
 		dryRun bool
 	}{
-		{unitFile("/opt/bin/letsgoagain", false), "/opt/bin/letsgoagain", false},
-		{unitFile("/opt/bin/letsgoagain", true), "/opt/bin/letsgoagain", true},
-		{unitFile(`/home/me/my "bins"/letsgoagain`, true), `/home/me/my "bins"/letsgoagain`, true},
+		{unitFile("/opt/bin/letsgoagain"), "/opt/bin/letsgoagain", false},
+		{unitFile("/opt/bin/letsgoagain", "--dry-run"), "/opt/bin/letsgoagain", true},
+		{unitFile(`/home/me/my "bins"/letsgoagain`, "--dry-run"), `/home/me/my "bins"/letsgoagain`, true},
 		{"[Service]\nRestart=always\n", "", false},
 	} {
 		if bin, dry := unitExec(tt.unit); bin != tt.bin || dry != tt.dryRun {

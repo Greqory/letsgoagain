@@ -10,12 +10,15 @@ import (
 )
 
 func TestUnitFile(t *testing.T) {
-	u := unitFile("/home/greg/go/bin/letsgoagain", true)
+	u := unitFile("/home/greg/go/bin/letsgoagain", "--dry-run")
 	if !strings.Contains(u, "ExecStart=/home/greg/go/bin/letsgoagain daemon --dry-run\n") || !strings.Contains(u, "WantedBy=default.target") {
 		t.Fatalf("unit:\n%s", u)
 	}
-	if u := unitFile("/home/greg/my bin/letsgoagain", false); !strings.Contains(u, `ExecStart="/home/greg/my bin/letsgoagain" daemon`+"\n") {
+	if u := unitFile("/home/greg/my bin/letsgoagain"); !strings.Contains(u, `ExecStart="/home/greg/my bin/letsgoagain" daemon`+"\n") {
 		t.Fatalf("quoted unit:\n%s", u)
+	}
+	if u := unitFile("/opt/letsgoagain", "--dry-run", "--no-notice"); !strings.Contains(u, "ExecStart=/opt/letsgoagain daemon --dry-run --no-notice\n") {
+		t.Fatalf("flags:\n%s", u)
 	}
 }
 

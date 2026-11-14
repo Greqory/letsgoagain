@@ -43,6 +43,14 @@ Out of scope: other agents, other providers, multiple machines, GUI, telemetry, 
   (`GET /api/session/{id}/message?order=desc`) is `type: "idle"`, `outcome: "failed"`, same `error`.
 - **Resuming works**: `POST /api/session/{id}/prompt` with `{"text": "…"}` on the failed session starts a
   new execution (`session.execution.started` → `succeeded`).
+- **A note in the TUI without running the session** (measured 2026-11-14): `POST /api/session/{id}/synthetic`
+  with `{"text", "description", "resume": false}` queues an inbox item (`session.inbox.enqueued` only): no
+  execution, `outcome` and `time.idle` unchanged (`time.updated` moves). The TUI shows only the
+  `description`, as `◈ <description>` under the session (the user saw it); the `text` reaches the agent only
+  if the item is delivered with the next input. `DELETE /api/session/{id}/inbox/{inboxID}` removes it (a
+  delivered or unknown item is a no-op); `PATCH` only changes the delivery, and steering wakes the session.
+  There is no endpoint for a real toast (`tui.toast.show` is an event type with no way to raise it from
+  outside; that would take an OpenCode plugin).
 - **Subagents** are sessions with `parentID`; roots have none. A child's finished round wakes its parent.
   When a child hits the limit, its root fails with the limit too; resuming the root is enough, the root
   wakes the child again (real run, 2026-11-14).
@@ -72,13 +80,19 @@ One Go program, `letsgoagain`, no OpenCode plugin.
      sessions are ignored: their parent fails too and is the one resumed).
   4. Checks the wall clock every 30 s (a laptop that slept through a reset resumes on wake); resumes due stops.
   5. `--dry-run` records and logs, sends nothing.
+  6. **TUI notice** (off with `--no-notice`, never in dry run): a recorded stop queues
+     `LetsGoAgain · Claude limit reached · continues automatically <Mon 15:04>` (`reset unknown, checking
+     again …` while probing) in the session (§2, synthetic with `resume: false`); a new plan replaces it; it is
+     removed **before** the resume prompt (otherwise it would be delivered to the agent with it) and whenever
+     the stop closes otherwise. A notice that fails is logged and never blocks a resume.
 - `letsgoagain status`: tracked stops, reset time and its source, attempts.
 - `letsgoagain doctor`: one line per dependency (the binary, the OpenCode service and its event stream,
   meridian's quota, the systemd unit and which binary it runs, the daemon's socket), ok/WARN/FAIL with a
   hint; exit 1 on a FAIL. Reads only; never prints the service password or meridian's `/health` (it holds
   the account's email).
 - `letsgoagain resume-now [sessionID | --all]`: resume without waiting for the reset.
-- `letsgoagain install` / `uninstall`: write, enable and remove the systemd user unit; idempotent.
+- `letsgoagain install [--dry-run] [--no-notice]` / `uninstall`: write, enable and remove the systemd user
+  unit (the flags go to the daemon's `ExecStart`); idempotent.
 - `letsgoagain update [--check]` / `version`: replace the binary with the latest GitHub release (checksum
   verified against the release's `checksums.txt`, atomic rename, service restarted); only when the user
   runs it. `install.sh` (repo root) installs or updates from the releases without Go.

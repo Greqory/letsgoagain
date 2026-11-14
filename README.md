@@ -14,8 +14,9 @@ session stops, and in the morning you find them all waiting for you. LetsGoAgain
 03:32  "task queue":          running again, stop done
 ```
 
-When the limit resets, each stopped session gets one message, **"Continue where you left off."**, and
-carries on. It's like typing it yourself, without the 3 am alarm.
+When the limit resets, each stopped session gets one message, **"The Claude usage limit has reset.
+Continue where you left off."**, and carries on. It's like typing it yourself, without the 3 am alarm.
+(Your own wording: `letsgoagain daemon --message "…"`.)
 
 ## Is this for me?
 

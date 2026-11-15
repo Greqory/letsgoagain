@@ -367,6 +367,61 @@ func TestStillSpentAtDueReschedules(t *testing.T) {
 	}
 }
 
+// meridian keeps "rejected" after the window reset and the next window has a future resetsAt (measured
+// 2026-11-15: five_hour rejected at 37 %): that must not push the resume back.
+func TestStickyRejectedDoesNotDelay(t *testing.T) {
+	h := newHarness(t, false)
+	h.quota.err = errors.New("down")
+	h.api.addFailed("ses_a", "", stopTime)
+	h.event(opencode.EventExecutionFailed, "ses_a")
+	due := stopTime.Add(4868*time.Second + reset.Margin)
+	ms, used := due.Add(5*time.Hour).UnixMilli(), 0.37
+	h.quota.q, h.quota.err = meridian.Quota{Buckets: []meridian.Bucket{{Type: "five_hour", Status: "rejected", Utilization: &used, ResetsAt: &ms}}}, nil
+	h.at(due)
+	if st := h.stop("ses_a"); h.api.promptCount() != 1 || st.Status != state.Resumed {
+		t.Fatalf("prompts %d, stop %+v; log:\n%s", h.api.promptCount(), st, h.log)
+	}
+}
+
+// The service lists the session but refuses the prompt with "not found" (its worktree was removed):
+// retry a few times, then give up instead of asking every 30 s for ever.
+func TestPromptRefusedGivesUp(t *testing.T) {
+	h := newHarness(t, false)
+	h.api.addFailed("ses_a", "", stopTime)
+	h.event(opencode.EventExecutionFailed, "ses_a")
+	h.api.promptErr = fmt.Errorf("POST /api/session/ses_a/prompt: %w", opencode.ErrNotFound)
+	h.at(h.stop("ses_a").NextAt)
+	h.at(h.now.Add(h.d.cfg.Reconnect))
+	if st := h.stop("ses_a"); st.Status != state.Waiting || st.Refusals != 2 {
+		t.Fatalf("after two refusals: %+v", st)
+	}
+	h.api.promptErr = nil // the worktree is back: the counter starts over
+	h.at(h.now.Add(h.d.cfg.Reconnect))
+	if st := h.stop("ses_a"); st.Status != state.Resumed || st.Refusals != 0 {
+		t.Fatalf("after a good prompt: %+v", st)
+	}
+
+	h.api.addFailed("ses_b", "", h.now)
+	h.event(opencode.EventExecutionFailed, "ses_b")
+	h.api.promptErr = fmt.Errorf("POST /api/session/ses_b/prompt: %w", opencode.ErrNotFound)
+	h.at(h.stop("ses_b").NextAt)
+	for i := 1; i < state.MaxRefusals; i++ {
+		h.at(h.now.Add(h.d.cfg.Reconnect))
+	}
+	st := h.stop("ses_b")
+	if st.Status != state.Failed || st.Attempts != 0 || !strings.Contains(st.Note, "worktree gone") {
+		t.Fatalf("stop %+v; log:\n%s", st, h.log)
+	}
+	if !strings.Contains(h.log.String(), "giving up, the service refuses the prompt") {
+		t.Fatalf("log:\n%s", h.log)
+	}
+	logged := h.log.Len()
+	h.at(h.now.Add(time.Hour))
+	if h.log.Len() != logged || h.stop("ses_b").Status != state.Failed {
+		t.Fatalf("kept trying after giving up; log:\n%s", h.log)
+	}
+}
+
 func TestIgnoresChildAndOtherFailures(t *testing.T) {
 	h := newHarness(t, false)
 	h.api.addFailed("ses_child", "ses_root", stopTime)

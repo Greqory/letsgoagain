@@ -68,8 +68,11 @@ Out of scope: other agents, other providers, multiple machines, GUI, telemetry, 
 - **meridian's quota**: `GET http://127.0.0.1:3456/v1/usage/quota` (no auth) returns `buckets` of
   `{type: five_hour | seven_day | seven_day_fable, status: allowed | allowed_warning | rejected,
   utilization (0…1), resetsAt (epoch ms), observedAt}`. meridian sets `rejected` when utilization ≥ 1 or
-  Claude Code reported the window rejected (that status can stick after the reset until the next request:
-  judge by `resetsAt` too). Fixture: `internal/meridian/testdata/`.
+  Claude Code reported the window rejected. **That status sticks after the reset until the next request,
+  and the next window then has a new future `resetsAt`**: measured 2026-11-15 09:08, `five_hour`
+  `rejected` at utilization 0.37 with the reset 5 h ahead, no limit hit; trusting it kept a session waiting
+  from 01:32 on, rescheduled every 5 h. So `rejected` counts only with utilization ≥ 0.95 (or none), and a
+  past `resetsAt` never counts. Fixture: `internal/meridian/testdata/`.
 - Why unsnooze failed: it scrapes the terminal for known banners, did not know meridian's, and the reset
   time is not on screen. It never caught a stop in two weeks.
 
@@ -111,7 +114,7 @@ One Go program, `letsgoagain`, no OpenCode plugin.
   state file when the daemon is not running.
 
 ### Reset time, in order of trust
-1. **meridian quota**: buckets that are exhausted (`rejected` or utilization ≥ 1) with `resetsAt` in the
+1. **meridian quota**: buckets that are exhausted (utilization ≥ 1, or `rejected` with utilization ≥ 0.95 or unknown) with `resetsAt` in the
    future → the latest of their `resetsAt`. Also says 5h vs weekly.
 2. **`retry_after`** from the error body, counted from the stop, only when it is above 60 and below 86400
    (60 = meridian did not know, 86400 = clamped).
@@ -130,7 +133,9 @@ A reset time gets a 60 s margin before the resume.
 4. `session.execution.succeeded` after the resume closes the stop as done. Another limit failure on the same session before
    a success is the same stop again: reschedule; after 5 attempts mark it failed and stop trying.
 5. The service unreachable at the due time → keep the stop and try on the next tick (the service may be
-   restarting); a session that no longer exists (404) → "gone".
+   restarting); a session that no longer exists (404 on `GET /api/session/{id}`) → "gone". A session
+   that is still listed but whose prompt answers 404 (its worktree was removed while it was stopped,
+   2026-11-15) is tried on 3 ticks in a row (`state.MaxRefusals`), then marked failed.
 
 ### State and files
 - State: `~/.local/state/letsgoagain/state.json` (atomic: temp file + rename); log:

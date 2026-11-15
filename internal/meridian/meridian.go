@@ -27,12 +27,19 @@ type Quota struct {
 	Buckets []Bucket `json:"buckets"`
 }
 
+// rejectedFloor is the utilization below which a "rejected" status is taken as stale. meridian keeps
+// the status after the window reset, and the next window then carries a new, future resetsAt: measured
+// 2026-11-15, five_hour rejected at 37 % with a reset 5 h ahead, which kept a session waiting for hours
+// with no limit hit.
+const rejectedFloor = 0.95
+
 // Exhausted returns the latest reset among the windows that are spent and reset after now. A window
-// counts as spent when meridian says rejected or it is fully used; a past resetsAt means it has reset,
-// whatever the (sticky) status says.
+// counts as spent when it is fully used, or meridian says rejected and the utilization does not
+// contradict it; a past resetsAt means it has reset, whatever the (sticky) status says.
 func (q Quota) Exhausted(now time.Time) (resetAt time.Time, window string, ok bool) {
 	for _, b := range q.Buckets {
-		spent := b.Status == "rejected" || (b.Utilization != nil && *b.Utilization >= 1)
+		rejected := b.Status == "rejected" && (b.Utilization == nil || *b.Utilization >= rejectedFloor)
+		spent := rejected || (b.Utilization != nil && *b.Utilization >= 1)
 		if !spent || b.ResetsAt == nil {
 			continue
 		}

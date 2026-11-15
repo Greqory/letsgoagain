@@ -453,6 +453,14 @@ func (d *Daemon) resume(ctx context.Context, st *state.Stop, why string) error {
 	// Before the prompt: a queued notice would otherwise be delivered to the agent along with it.
 	d.clearNotice(ctx, st)
 	if err := d.api.Prompt(ctx, st.SessionID, d.cfg.Message); err != nil {
+		if errors.Is(err, opencode.ErrNotFound) {
+			// The session is listed (Session above), so it is the prompt that is refused: its worktree is gone.
+			if st.Refusals++; st.Refusals >= state.MaxRefusals {
+				st.Close(state.Failed, fmt.Sprintf("prompt refused %d times: %v (worktree gone?)", st.Refusals, err), now)
+				d.cfg.Log.Printf("%s: giving up, the service refuses the prompt (%v); is its worktree gone?", d.name(st), err)
+				return err
+			}
+		}
 		return d.retryLater(st, err)
 	}
 	st.MarkResumed(now)

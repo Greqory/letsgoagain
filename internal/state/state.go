@@ -28,6 +28,10 @@ const (
 // MaxAttempts is how many resumes one stop gets.
 const MaxAttempts = 5
 
+// MaxRefusals is how many prompts in a row the service may answer "not found" for a session it still
+// lists (its worktree is gone, measured 2026-11-15) before the stop is given up.
+const MaxRefusals = 3
+
 // keepClosed is how long closed stops stay in the file for `status`.
 const keepClosed = 7 * 24 * time.Hour
 
@@ -45,6 +49,7 @@ type Stop struct {
 	Source     string    `json:"source"`
 	Window     string    `json:"window,omitempty"`
 	Attempts   int       `json:"attempts"`
+	Refusals   int       `json:"refusals,omitempty"` // prompts in a row answered "not found"
 	Status     string    `json:"status"`
 	Note       string    `json:"note,omitempty"`
 	UpdatedAt  time.Time `json:"updatedAt"`
@@ -198,5 +203,6 @@ func (st *Stop) Close(status, note string, now time.Time) {
 // MarkResumed records a sent resume.
 func (st *Stop) MarkResumed(now time.Time) {
 	st.Attempts++
+	st.Refusals = 0
 	st.Status, st.Note, st.UpdatedAt = Resumed, "", now
 }

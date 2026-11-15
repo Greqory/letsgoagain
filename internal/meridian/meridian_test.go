@@ -27,6 +27,7 @@ func TestExhausted(t *testing.T) {
 		{"full but status lags", []Bucket{{Type: "five_hour", Status: "allowed_warning", Utilization: f(1), ResetsAt: ms(in5h)}}, in5h, "five_hour"},
 		{"both spent, weekly wins", []Bucket{{Type: "five_hour", Status: "rejected", ResetsAt: ms(in5h)}, {Type: "seven_day", Status: "rejected", ResetsAt: ms(in2d)}}, in2d, "seven_day"},
 		{"sticky rejected after reset", []Bucket{{Type: "five_hour", Status: "rejected", Utilization: f(1), ResetsAt: ms(now.Add(-time.Minute))}}, time.Time{}, ""},
+		{"sticky rejected in the next window (measured 2026-11-15)", []Bucket{{Type: "five_hour", Status: "rejected", Utilization: f(0.37), ResetsAt: ms(in5h)}, {Type: "seven_day", Status: "allowed_warning", Utilization: f(0.93), ResetsAt: ms(in2d)}}, time.Time{}, ""},
 		{"rejected without reset", []Bucket{{Type: "five_hour", Status: "rejected"}}, time.Time{}, ""},
 	}
 	for _, tt := range tests {

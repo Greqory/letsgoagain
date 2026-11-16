@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -156,7 +157,7 @@ func TestClient(t *testing.T) {
 			cancelled = true
 			w.Write([]byte(`{"data":null}`))
 		case r.URL.Path == "/api/session/active":
-			w.Write([]byte(`{"data":{"ses_busy":{"type":"running"}}}`))
+			w.Write([]byte(`{"data":{"ses_busy":{"type":"running"},"ses_also":{"type":"running"}}}`))
 		case r.URL.Path == "/api/session" && r.Method == http.MethodGet:
 			if r.URL.Query().Get("parentID") != "null" {
 				t.Errorf("roots query %q", r.URL.RawQuery)
@@ -195,6 +196,9 @@ func TestClient(t *testing.T) {
 	}
 	if busy, err := c.Running(ctx, id); err != nil || busy {
 		t.Fatalf("running idle: %v, %v", busy, err)
+	}
+	if ids, err := c.Active(ctx); err != nil || !slices.Equal(ids, []string{"ses_also", "ses_busy"}) {
+		t.Fatalf("active: %v, %v", ids, err)
 	}
 	roots, err := c.RootSessions(ctx, 50)
 	if err != nil || len(roots) != 2 || roots[0].Outcome != "failed" {

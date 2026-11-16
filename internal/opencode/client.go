@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -90,16 +91,36 @@ func (c *Client) RecentMessages(ctx context.Context, id string, n int) ([]Messag
 	return out.Data, err
 }
 
-// Running reports whether a session is executing right now.
-func (c *Client) Running(ctx context.Context, id string) (bool, error) {
+func (c *Client) active(ctx context.Context) (map[string]json.RawMessage, error) {
 	var out struct {
 		Data map[string]json.RawMessage `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/api/session/active", nil, &out); err != nil {
+	err := c.do(ctx, http.MethodGet, "/api/session/active", nil, &out)
+	return out.Data, err
+}
+
+// Running reports whether a session is executing right now.
+func (c *Client) Running(ctx context.Context, id string) (bool, error) {
+	active, err := c.active(ctx)
+	if err != nil {
 		return false, err
 	}
-	_, ok := out.Data[id]
+	_, ok := active[id]
 	return ok, nil
+}
+
+// Active returns the IDs of all sessions executing right now, subagents included, sorted.
+func (c *Client) Active(ctx context.Context) ([]string, error) {
+	active, err := c.active(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(active))
+	for id := range active {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // Prompt sends one user message to a session.

@@ -120,17 +120,32 @@ func (s *State) Save(path string, now time.Time) error {
 	return nil
 }
 
-// Sorted returns the stops, open ones first, each group by next time.
+// Touched is when the stop last changed; stops from older state files may only have StoppedAt.
+func (st *Stop) Touched() time.Time {
+	if st.UpdatedAt.IsZero() {
+		return st.StoppedAt
+	}
+	return st.UpdatedAt
+}
+
+// Sorted returns the stops: open ones first, the soonest to act on at the top; then closed ones, the
+// most recently closed at the top. Ties go by session ID, so the order never flickers.
 func (s *State) Sorted() []*Stop {
 	out := make([]*Stop, 0, len(s.Stops))
 	for _, st := range s.Stops {
 		out = append(out, st)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Open() != out[j].Open() {
-			return out[i].Open()
+		a, b := out[i], out[j]
+		switch {
+		case a.Open() != b.Open():
+			return a.Open()
+		case a.Open() && !a.NextAt.Equal(b.NextAt):
+			return a.NextAt.Before(b.NextAt)
+		case !a.Open() && !a.Touched().Equal(b.Touched()):
+			return a.Touched().After(b.Touched())
 		}
-		return out[i].NextAt.Before(out[j].NextAt)
+		return a.SessionID < b.SessionID
 	})
 	return out
 }

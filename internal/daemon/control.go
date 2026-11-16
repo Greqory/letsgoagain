@@ -32,19 +32,15 @@ type request struct {
 }
 
 type reply struct {
-	Stops   []state.Stop `json:"stops,omitempty"`
-	Results []string     `json:"results,omitempty"`
-	Error   string       `json:"error,omitempty"`
+	Overview *Overview `json:"overview,omitempty"`
+	Results  []string  `json:"results,omitempty"`
+	Error    string    `json:"error,omitempty"`
 }
 
 func (d *Daemon) control(ctx context.Context, r request) reply {
 	switch r.kind {
 	case "status":
-		var out []state.Stop
-		for _, st := range d.st.Sorted() {
-			out = append(out, *st)
-		}
-		return reply{Stops: out}
+		return reply{Overview: d.overview(ctx)}
 	case "resume":
 		if d.api == nil {
 			return reply{Error: "the OpenCode service is not reachable"}
@@ -131,10 +127,22 @@ func NewControl(socketPath string) *Control {
 	return &Control{http: &http.Client{Transport: tr, Timeout: 60 * time.Second}}
 }
 
+// Overview returns what the daemon knows: stops, running sessions, the quota.
+func (c *Control) Overview() (Overview, error) {
+	rep, err := c.call(http.MethodGet, "/status")
+	if err != nil {
+		return Overview{}, err
+	}
+	if rep.Overview == nil {
+		return Overview{}, errors.New("daemon: empty status")
+	}
+	return *rep.Overview, nil
+}
+
 // Status returns the daemon's stops.
 func (c *Control) Status() ([]state.Stop, error) {
-	rep, err := c.call(http.MethodGet, "/status")
-	return rep.Stops, err
+	ov, err := c.Overview()
+	return ov.Stops, err
 }
 
 // ResumeNow resumes one waiting stop, or all with id "".

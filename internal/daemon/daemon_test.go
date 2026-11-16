@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +33,7 @@ type fakeAPI struct {
 	version   string
 	inbox     map[string]string // inbox ID → description
 	noticeErr error
+	activeErr error
 	calls     []string // "notice <desc>", "cancel <id>", "prompt <session>", in order
 	nextID    int
 }
@@ -185,6 +187,22 @@ func (f *fakeAPI) Running(_ context.Context, id string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.running[id], nil
+}
+
+func (f *fakeAPI) Active(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.activeErr != nil {
+		return nil, f.activeErr
+	}
+	var out []string
+	for id, on := range f.running {
+		if on {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (f *fakeAPI) Prompt(_ context.Context, id, text string) error {
@@ -726,6 +744,49 @@ func TestVersionNotes(t *testing.T) {
 	}
 }
 
+func TestOverview(t *testing.T) {
+	h := newHarness(t, true)
+	h.api.version = "2.3.0"
+	busySince := stopTime.Add(-90 * time.Minute)
+	h.api.goesOn("ses_b_run", stopTime.Add(-3*time.Hour))
+	h.api.goesOn("ses_a_run", stopTime.Add(-3*time.Hour))
+	h.api.append("ses_child", "ses_a_run", stopTime, "succeeded")
+	for _, id := range []string{"ses_a_run", "ses_b_run", "ses_child", "ses_vanished"} {
+		h.api.running[id] = true
+		if s, ok := h.api.sessions[id]; ok {
+			s.Time.Busy = busySince.UnixMilli()
+			h.api.sessions[id] = s
+		}
+	}
+	ms := stopTime.Add(time.Hour).UnixMilli()
+	h.quota.q = meridian.Quota{Buckets: []meridian.Bucket{{Type: "five_hour", Status: "allowed", ResetsAt: &ms}}}
+
+	ov := h.d.overview(context.Background())
+	if !ov.Connected || ov.OpenCode != "2.3.0" || !ov.DryRun || ov.ListeningErr != "" {
+		t.Fatalf("overview: %+v", ov)
+	}
+	// Roots only (not the subagent, not the session that finished between the two calls), by title.
+	if len(ov.Listening) != 2 || ov.Listening[0].SessionID != "ses_a_run" || ov.Listening[1].SessionID != "ses_b_run" ||
+		ov.Listening[0].Title != "work ses_a_run" || !ov.Listening[0].Since.Equal(busySince) {
+		t.Fatalf("listening: %+v", ov.Listening)
+	}
+	if ov.Quota == nil || len(ov.Quota.Buckets) != 1 || ov.QuotaErr != "" {
+		t.Fatalf("quota: %+v %q", ov.Quota, ov.QuotaErr)
+	}
+
+	h.api.activeErr, h.quota.err = errors.New("service says no"), errors.New("meridian down")
+	ov = h.d.overview(context.Background())
+	if len(ov.Listening) != 0 || ov.ListeningErr != "service says no" || ov.Quota != nil || ov.QuotaErr != "meridian down" {
+		t.Fatalf("errors: %+v", ov)
+	}
+
+	h.d.handle(context.Background(), disconnected{})
+	ov = h.d.overview(context.Background())
+	if ov.Connected || ov.OpenCode != "" || len(ov.Listening) != 0 || ov.ListeningErr != "" {
+		t.Fatalf("disconnected: %+v", ov)
+	}
+}
+
 func TestControlOverSocket(t *testing.T) {
 	h := newHarness(t, false)
 	h.api.addFailed("ses_a", "", stopTime)
@@ -754,6 +815,9 @@ func TestControlOverSocket(t *testing.T) {
 	}
 	if err != nil || len(stops) != 1 || stops[0].Status != state.Waiting {
 		t.Fatalf("status: %+v %v", stops, err)
+	}
+	if ov, err := c.Overview(); err != nil || !ov.Connected || len(ov.Stops) != 1 || ov.Quota == nil {
+		t.Fatalf("overview: %+v %v", ov, err)
 	}
 	if _, err := c.ResumeNow("ses_nope"); err == nil || !strings.Contains(err.Error(), "no waiting stop for ses_nope") {
 		t.Fatalf("unknown id: %v", err)

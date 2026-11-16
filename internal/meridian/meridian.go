@@ -33,14 +33,18 @@ type Quota struct {
 // with no limit hit.
 const rejectedFloor = 0.95
 
-// Exhausted returns the latest reset among the windows that are spent and reset after now. A window
-// counts as spent when it is fully used, or meridian says rejected and the utilization does not
-// contradict it; a past resetsAt means it has reset, whatever the (sticky) status says.
+// Spent reports whether the window is used up: fully used, or meridian says rejected and the
+// utilization does not contradict it. Whether it has reset since is up to the caller (resetsAt).
+func (b Bucket) Spent() bool {
+	rejected := b.Status == "rejected" && (b.Utilization == nil || *b.Utilization >= rejectedFloor)
+	return rejected || (b.Utilization != nil && *b.Utilization >= 1)
+}
+
+// Exhausted returns the latest reset among the windows that are spent and reset after now. A past
+// resetsAt means the window has reset, whatever the (sticky) status says.
 func (q Quota) Exhausted(now time.Time) (resetAt time.Time, window string, ok bool) {
 	for _, b := range q.Buckets {
-		rejected := b.Status == "rejected" && (b.Utilization == nil || *b.Utilization >= rejectedFloor)
-		spent := rejected || (b.Utilization != nil && *b.Utilization >= 1)
-		if !spent || b.ResetsAt == nil {
+		if !b.Spent() || b.ResetsAt == nil {
 			continue
 		}
 		at := time.UnixMilli(*b.ResetsAt)

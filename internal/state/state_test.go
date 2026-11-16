@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -104,5 +105,33 @@ func TestSaveLoad(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("want an error for a broken file")
+	}
+}
+
+func TestSortedOrder(t *testing.T) {
+	s := New()
+	add := func(id, status string, next, updated time.Time) {
+		s.Stops[id] = &Stop{SessionID: id, Status: status, NextAt: next, UpdatedAt: updated}
+	}
+	add("ses_done_old", Done, t0.Add(-9*time.Hour), t0.Add(-8*time.Hour))
+	add("ses_done_new", Done, t0.Add(-3*time.Hour), t0.Add(-2*time.Hour))
+	add("ses_dry_new", DryRun, t0.Add(-20*time.Hour), t0.Add(-time.Hour)) // long-planned, closed last
+	add("ses_wait_late", Waiting, t0.Add(5*time.Hour), t0)
+	add("ses_wait_soon", Waiting, t0.Add(time.Hour), t0)
+	add("ses_resumed", Resumed, t0.Add(-time.Hour), t0.Add(-time.Hour))
+	s.Stops["ses_legacy"] = &Stop{SessionID: "ses_legacy", Status: Done, StoppedAt: t0.Add(-4 * time.Hour)} // no UpdatedAt
+	add("ses_tie_b", Done, t0, t0.Add(-5*time.Hour))
+	add("ses_tie_a", Done, t0, t0.Add(-5*time.Hour))
+
+	want := []string{"ses_resumed", "ses_wait_soon", "ses_wait_late",
+		"ses_dry_new", "ses_done_new", "ses_legacy", "ses_tie_a", "ses_tie_b", "ses_done_old"}
+	for i := 0; i < 20; i++ { // map order is random: the result must not be
+		var got []string
+		for _, st := range s.Sorted() {
+			got = append(got, st.SessionID)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("got  %v\nwant %v", got, want)
+		}
 	}
 }

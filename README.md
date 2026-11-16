@@ -87,11 +87,35 @@ Mostly you don't: start your agents and go to sleep. When you want to look:
 
 | Command | What it does |
 |---|---|
-| `letsgoagain status` | Every tracked stop: when it stopped, when it resumes, how many tries. |
+| `letsgoagain status` | The daemon, your Claude quota and its reset times, the sessions running right now ("listening"), and the stops: when each stopped, when it resumes, how many tries. Shows open stops and those of the last 24 hours; `--all` lists every one with full dates, `--12h` uses AM/PM. |
 | `letsgoagain doctor` | Checks everything it depends on: OpenCode, its event stream, meridian's quota, the service, the daemon. |
 | `letsgoagain resume-now <session-id>` | Resume one stopped session right away. `--all` for every one. |
 | `letsgoagain update` | Update to the latest release (checks first; `--check` only tells you). |
 | `letsgoagain version` | Show the installed version. |
+
+`status` looks like this:
+
+```
+daemon: running, connected to OpenCode 2.3.0
+
+Quota
+  5-hour        6%  resets Mon 13:19 (in 5h 03m)
+  weekly        3%  resets Mon 23 Nov 07:00 (in 6d 23h)
+  weekly Fable  0%  resets Mon 23 Nov 07:00 (in 6d 23h)
+
+Listening: 2 running; one that hits the limit continues after the reset
+  F017 coordination ses_e247ce17dffebrA8ySiDRsdp0P  running 1h 30m
+  Fix the login bug ses_e1cc9fe73ffeL9N7gzHTno1Tv4  running 4m
+
+Stops: open ones and the last 24 hours (--all shows the 4 older)
+STATUS   SESSION                    STOPPED    NEXT                   FROM             RESUMES  NOTE
+waiting  Refactor billing ses_e1f1…  Mon 07:00  Mon 09:21 (in 1h 21m)  quota five_hour  0/5
+done     Nightly batch ses_e242…     Sun 23:02  -                      quota five_hour  1/5
+```
+
+"Listening" is the proof that the daemon is watching: those sessions are running now, and if one of them
+hits the limit, it is recorded and continued after the reset. Open stops are listed first, then closed ones, the
+most recent first. Times use a 24-hour clock whatever your locale says; add `--12h` for AM/PM.
 
 Everything it decides is written to `~/.local/state/letsgoagain/letsgoagain.log`, one line per decision:
 

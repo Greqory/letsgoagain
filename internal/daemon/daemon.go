@@ -28,6 +28,7 @@ type API interface {
 	RootSessions(ctx context.Context, limit int) ([]opencode.Session, error)
 	RecentMessages(ctx context.Context, id string, n int) ([]opencode.Message, error)
 	Running(ctx context.Context, id string) (bool, error)
+	Active(ctx context.Context) ([]string, error)
 	Prompt(ctx context.Context, id, text string) error
 	AddNotice(ctx context.Context, id, description, text string) (string, error)
 	CancelNotice(ctx context.Context, id, inboxID string) error

@@ -22,7 +22,7 @@ const usage = `letsgoagain: let's go again after a Claude usage limit.
 
 Usage:
   letsgoagain daemon [--dry-run] [--no-notice] [--meridian URL] [--message TEXT]
-  letsgoagain status [--all] [--12h]
+  letsgoagain status [--all] [--12h] [--no-update-check]
   letsgoagain doctor [--meridian URL]
   letsgoagain resume-now [SESSION_ID | --all]
   letsgoagain install [--dry-run] [--no-notice]

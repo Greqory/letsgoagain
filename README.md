@@ -87,7 +87,7 @@ Mostly you don't: start your agents and go to sleep. When you want to look:
 
 | Command | What it does |
 |---|---|
-| `letsgoagain status` | The daemon, your Claude quota and its reset times, the sessions running right now ("listening"), and the stops: when each stopped, when it resumes, how many tries. Shows open stops and those of the last 24 hours; `--all` lists every one with full dates, `--12h` uses AM/PM. |
+| `letsgoagain status` | The daemon, your Claude quota and its reset times, the sessions running right now ("listening"), and the stops: when each stopped, when it resumes, how many tries. Shows open stops and those of the last 24 hours; `--all` lists every one with full dates, `--12h` uses AM/PM. The first line says whether you are up to date or which command updates you; `--no-update-check` skips asking GitHub. |
 | `letsgoagain doctor` | Checks everything it depends on: OpenCode, its event stream, meridian's quota, the service, the daemon. |
 | `letsgoagain resume-now <session-id>` | Resume one stopped session right away. `--all` for every one. |
 | `letsgoagain update` | Update to the latest release (checks first; `--check` only tells you). |
@@ -96,6 +96,8 @@ Mostly you don't: start your agents and go to sleep. When you want to look:
 `status` looks like this:
 
 ```
+letsgoagain v0.2.0 is up to date
+
 daemon: running, connected to OpenCode 2.3.0
 
 Quota
@@ -112,6 +114,8 @@ STATUS   SESSION                    STOPPED    NEXT                   FROM      
 waiting  Refactor billing ses_e1f1…  Mon 07:00  Mon 09:21 (in 1h 21m)  quota five_hour  0/5
 done     Nightly batch ses_e242…     Sun 23:02  -                      quota five_hour  1/5
 ```
+
+When a newer release exists, the first line reads `Update available: v0.2.0 → v0.3.0, run: letsgoagain update`.
 
 "Listening" is the proof that the daemon is watching: those sessions are running now, and if one of them
 hits the limit, it is recorded and continued after the reset. Open stops are listed first, then closed ones, the
@@ -206,7 +210,8 @@ stop it gives up and shows that in `status`.
 - It never reads your Claude credentials. The quota comes from meridian.
 - It never types into your terminal.
 - It never sends anything anywhere except to your own OpenCode service and meridian on `127.0.0.1`.
-  `letsgoagain update` talks to GitHub, and only when you run it.
+  `letsgoagain update` and `letsgoagain status` talk to GitHub, and only when you run them (`status`
+  only asks for the newest version number; `--no-update-check` skips that).
 
 ## Troubleshooting
 

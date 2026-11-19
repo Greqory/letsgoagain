@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -132,6 +133,24 @@ func TestPrintStatus12h(t *testing.T) {
 	}
 	if strings.Contains(out, "13:03") {
 		t.Errorf("24-hour time in a 12-hour view:\n%s", out)
+	}
+}
+
+func TestUpdateLine(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cur, latest string
+		err         error
+		want        string
+	}{
+		"up to date":  {"v0.2.0", "v0.2.0", nil, "letsgoagain v0.2.0 is up to date"},
+		"ahead":       {"v0.3.0", "v0.2.0", nil, "letsgoagain v0.3.0 is up to date"},
+		"newer":       {"v0.2.0", "v0.3.0", nil, "Update available: v0.2.0 → v0.3.0, run: letsgoagain update"},
+		"dev build":   {"dev", "v0.3.0", nil, "letsgoagain is a development build; the latest release is v0.3.0"},
+		"check fails": {"v0.2.0", "", errors.New("latest release: offline"), "Update check failed: latest release: offline"},
+	} {
+		if got := updateLine(tc.cur, tc.latest, tc.err); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
 	}
 }
 

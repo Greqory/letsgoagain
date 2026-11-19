@@ -1,6 +1,7 @@
 // Package update replaces the running letsgoagain with the newest GitHub release: it finds the latest
 // tag, downloads the binary for this machine, checks it against the release's checksums.txt and swaps
-// it in atomically. Only on the user's `letsgoagain update`, never by itself.
+// it in atomically. Only when the user runs `letsgoagain update` (or `status`, which asks for the latest
+// tag alone), never by itself.
 package update
 
 import (
@@ -157,7 +158,10 @@ func Newer(current, latest string) bool {
 
 func parse(v string) ([3]int, error) {
 	var out [3]int
-	core, _, _ := strings.Cut(strings.TrimPrefix(v, "v"), "-")
+	core := strings.TrimPrefix(v, "v")
+	if i := strings.IndexAny(core, "-+"); i >= 0 { // pre-release or build metadata, e.g. v0.3.0+dirty
+		core = core[:i]
+	}
 	parts := strings.Split(core, ".")
 	if len(parts) != 3 {
 		return out, errors.New("not vMAJOR.MINOR.PATCH")

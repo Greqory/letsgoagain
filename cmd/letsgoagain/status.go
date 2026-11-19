@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -12,24 +13,69 @@ import (
 	"github.com/Greqory/letsgoagain/internal/daemon"
 	"github.com/Greqory/letsgoagain/internal/meridian"
 	"github.com/Greqory/letsgoagain/internal/state"
+	"github.com/Greqory/letsgoagain/internal/update"
 )
 
 // recentWindow is how far back closed stops are shown unless --all is given.
 const recentWindow = 24 * time.Hour
 
+// updateTimeout keeps `status` quick when GitHub is slow or the machine is offline.
+const updateTimeout = 4 * time.Second
+
 func runStatus(w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	all := fs.Bool("all", false, "every tracked stop, with full dates (default: open ones and those of the last 24 hours)")
 	ampm := fs.Bool("12h", false, "show times on a 12-hour clock (AM/PM)")
+	noCheck := fs.Bool("no-update-check", false, "do not ask GitHub whether a newer version exists")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var latest <-chan latestRelease
+	if !*noCheck {
+		latest = checkLatest()
 	}
 	ov, running, err := loadOverview()
 	if err != nil {
 		return err
 	}
+	if latest != nil {
+		l := <-latest
+		fmt.Fprintln(w, updateLine(currentVersion(), l.tag, l.err))
+		fmt.Fprintln(w)
+	}
 	printStatus(w, ov, running, clock{ampm: *ampm}, *all, time.Now())
 	return nil
+}
+
+type latestRelease struct {
+	tag string
+	err error
+}
+
+// checkLatest asks GitHub for the newest release in the background, so the wait overlaps with
+// reading the daemon's overview.
+func checkLatest() <-chan latestRelease {
+	ch := make(chan latestRelease, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+		defer cancel()
+		tag, err := update.New().Latest(ctx)
+		ch <- latestRelease{tag, err}
+	}()
+	return ch
+}
+
+// updateLine tells whether cur is the newest release, and what to run when it is not.
+func updateLine(cur, latest string, err error) string {
+	switch {
+	case err != nil:
+		return fmt.Sprintf("Update check failed: %v", err)
+	case cur == "dev":
+		return fmt.Sprintf("letsgoagain is a development build; the latest release is %s", latest)
+	case update.Newer(cur, latest):
+		return fmt.Sprintf("Update available: %s → %s, run: letsgoagain update", cur, latest)
+	}
+	return fmt.Sprintf("letsgoagain %s is up to date", cur)
 }
 
 // loadOverview asks the daemon, falling back to the state file when it is not running.

@@ -99,13 +99,16 @@ One Go program, `letsgoagain`, no OpenCode plugin.
      again …` while probing) in the session (§2, synthetic with `resume: false`); a new plan replaces it; it is
      removed **before** the resume prompt (otherwise it would be delivered to the agent with it) and whenever
      the stop closes otherwise. A notice that fails is logged and never blocks a resume.
-- `letsgoagain status [--all] [--12h]`: the daemon (connected, dry run), the quota windows with their reset
+- `letsgoagain status [--all] [--12h] [--no-update-check]`: the daemon (connected, dry run), the quota windows with their reset
   times (meridian, as the daemon sees it), the running root sessions ("Listening": `GET /api/session/active`
   without subagents), and the stops with reset time, its source and attempts. Open stops first (soonest
   first), then closed ones, most recently closed first; by default only open ones and those changed in the
   last 24 h, `--all` every tracked one with full dates. 24-hour clock regardless of locale (the user's own
-  `LANG` is en_US with a 24-hour day); `--12h` for AM/PM. The daemon assembles all of it (the CLI makes no
-  network calls); without a daemon only the stops from the state file are shown.
+  `LANG` is en_US with a 24-hour day); `--12h` for AM/PM. The daemon assembles all of it; without a daemon only
+  the stops from the state file are shown. The one network call the CLI itself makes is the update check
+  (user, 2026-11-19): the newest release tag from GitHub, 4 s timeout, run in parallel with the overview,
+  first line of the output (above the daemon line) "up to date" / "Update available … run: letsgoagain update" / a failure note;
+  `--no-update-check` skips it. Only when the user runs `status`, never from the daemon.
 - `letsgoagain doctor`: one line per dependency (the binary, the OpenCode service and its event stream,
   meridian's quota, the systemd unit and which binary it runs, the daemon's socket), ok/WARN/FAIL with a
   hint; exit 1 on a FAIL. Reads only; never prints the service password or meridian's `/health` (it holds
